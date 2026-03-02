@@ -1,0 +1,573 @@
+MACRO HEDGE FUND SYSTEM — IMPLEMENTATION TICKETS
+=================================================
+Build order is intentional. Complete each ticket before starting the next.
+Tickets within a section can sometimes be parallelized; cross-section dependencies are noted.
+
+
+═══════════════════════════════════════════════
+SECTION 1: PROJECT FOUNDATION
+═══════════════════════════════════════════════
+
+TICKET 001 — Project Scaffold
+- Python 3.11+ project initialized with uv; pyproject.toml and uv.lock committed
+- Docker Compose file runs the app and a local PostgreSQL instance
+- FastAPI app starts and returns 200 on GET /health
+- Environment variables loaded from .env file (never hardcoded)
+- .env.example committed with all required keys documented and no real values
+- No requirements.txt exists in the repository
+- README documents how to run the project locally from scratch
+
+TICKET 002 — Database Schema & Migrations
+- Alembic initialized and connected to the PostgreSQL instance
+- All tables from PRD Section 4.6 created via versioned migration files:
+  pods, users, pod_memberships, theses, thesis_instruments,
+  falsification_conditions, condition_evaluations, workflow_registry,
+  workflow_runs, further_reading, positions, trades, portfolio_snapshots,
+  economic_calendar, news_events, alerts
+- All tables have a pod_id foreign key where specified in the PRD
+- audit_log table exists and is append-only (no update/delete permissions)
+- falsification_conditions table includes chain_operator and chain_group
+  fields (nullable, for v2 use)
+- pgvector extension enabled; theses table has an embedding column
+- Migration runs cleanly from zero on a fresh database
+- Seed script creates one default pod, one default user, and one pod_configs row with all default values from PRD Section 9.2
+- pod_configs table has one row per pod with all parameters from PRD Section 9.2
+
+TICKET 003 — Configuration, Settings & Trading Calendar Module
+- Infrastructure config (API keys, DB URL, etc.) loaded from .env at startup via a Settings Pydantic model
+- PodSettings Pydantic model loads all operational parameters from pod_configs at request time
+- No service or workflow reads pod_configs directly — all receive a PodSettings object
+- No magic numbers in application logic; every operational parameter comes from PodSettings
+- Changes to pod_configs values write to audit_log in the same transaction
+- TradingCalendar utility class exists in app/core/ with method: most_recent_trading_day(as_of: date) -> date
+- TradingCalendar accounts for US market holidays and weekends
+- TradingCalendar is used consistently by all workflows, the monitoring job, and the position sizer — never inline date logic
+- Tests confirm: Settings raises clear errors for missing env vars, PodSettings loads correctly from pod_configs, audit entry written on every pod_configs update, TradingCalendar returns correct dates around holidays and weekends
+
+
+═══════════════════════════════════════════════
+SECTION 2: DATA INTEGRATIONS
+═══════════════════════════════════════════════
+
+TICKET 004 — FRED API Client
+- FREDClient class wraps the fredapi library
+- Methods: get_series(series_id, start_date, end_date), get_release_dates(release_id)
+- All responses include retrieval timestamp for citation purposes
+- Client raises a typed FREDClientError on API failure
+- Results are cached locally to avoid redundant API calls within a single
+  workflow run
+- Tests mock the API and confirm correct data parsing and error handling
+
+TICKET 005 — FRED Economic Calendar
+- Script fetches upcoming and recent release dates from FRED for all
+  supported scheduled trigger types: CPI_RELEASE, FOMC_DECISION,
+  NFP_RELEASE, PMI_RELEASE, GDP_RELEASE, PCE_RELEASE
+- Results stored in the economic_calendar table with release_type,
+  scheduled_date, and actual_date (populated after release)
+- Script is idempotent — safe to run repeatedly without duplicating rows
+- Tests confirm correct parsing and storage of release dates
+
+TICKET 005b — OECD API Client
+- OECDClient class wraps the OECD JSON RESTful API (no library required,
+  direct HTTP calls via httpx)
+- Methods: get_series(dataset, subject, country, start_date, end_date)
+- Supports key developed market series: ECB policy rates, Eurozone CPI,
+  non-US G10 yield curves, OECD composite PMI
+- All responses include retrieval timestamp for citation purposes
+- Client raises a typed OECDClientError on API failure
+- Results cached locally within a single workflow run
+- Tests mock the API and confirm correct parsing and error handling
+
+TICKET 006 — IBKR Client Portal API Client
+- IBKRClient class wraps the IBKR Client Portal REST API
+- Methods: get_positions(), get_account_summary(), get_price_history(symbol,
+  period, bar_size), submit_order(order), cancel_order(order_id),
+  get_news(since_timestamp)
+- Client reads trading_mode from pod settings and routes to paper or real
+  account accordingly
+- All requests include authentication headers; session management handled
+  automatically
+- Client raises a typed IBKRClientError with status code on failure
+- Tests mock the API and confirm correct routing between paper and real modes
+
+TICKET 007 — Web Search Integration
+- WebSearchClient wraps the Anthropic web search tool
+- Method: search(query) returns a list of SearchResult objects, each with
+  url, title, snippet, and retrieval_date
+- Source quality ranking applied: primary sources (gov, academic, central
+  bank) ranked above aggregators
+- All results include full URL and retrieval date for citation
+- Tests confirm result parsing and quality ranking logic
+
+
+═══════════════════════════════════════════════
+SECTION 3: WORKFLOW ENGINE
+═══════════════════════════════════════════════
+
+TICKET 008 — BaseWorkflow Class & WorkflowResult
+- BaseWorkflow abstract class exists with interface matching PRD Section 4.5:
+  name, description, required_inputs, execute(thesis, context)
+- WorkflowResult dataclass exists with fields: workflow_name, status,
+  structured_output, citations, agent_inferences, raw_output
+- Citation dataclass exists with fields: source_type, label, url,
+  retrieval_date (format matches PRD citation table)
+- WorkflowContext dataclass exists and holds: thesis object, prior
+  WorkflowResult list, pod settings
+- Attempting to instantiate BaseWorkflow directly raises NotImplementedError
+- Tests confirm interface contract is enforced
+
+TICKET 009 — Workflow Registry
+- workflow_registry table is populated at app startup by scanning the
+  /workflows directory and registering all BaseWorkflow subclasses
+- WorkflowRunner class accepts a thesis and executes a named list of
+  workflows sequentially, passing accumulated WorkflowResult objects as
+  context to each step
+- Each workflow execution is logged to workflow_runs with: thesis_id,
+  workflow_name, status, structured_output (JSON), citations (JSON),
+  started_at, completed_at
+- On workflow failure, status is set to 'failed', error is logged, and the
+  runner continues to subsequent steps with a partial context flag
+- Tests confirm sequential execution, context accumulation, and failure
+  handling
+
+TICKET 010 — MacroContextWorkflow
+- Implements BaseWorkflow
+- Pulls FRED series relevant to the thesis based on thesis content:
+  at minimum yield curve (T10Y2Y), CPI (CPIAUCSL), Fed Funds Rate (FEDFUNDS),
+  and unemployment (UNRATE)
+- Produces a structured summary of current macro backdrop
+- All data points cited with FRED series ID and retrieval date
+- Agent inferences explicitly flagged in agent_inferences field
+- Tests confirm correct FRED series selection and citation format
+
+TICKET 011 — HistoricalAnalogWorkflow
+- Implements BaseWorkflow
+- Identifies 2-4 historical periods with macro configurations similar to
+  the current backdrop using FRED data
+- For each analog period: date range, macro conditions, and outcome summary
+- All data cited; reasoning about similarity explicitly flagged as
+  [Agent inference]
+- Depends on MacroContextWorkflow result in context
+- Tests confirm analog identification and citation requirements
+
+TICKET 012 — InstrumentAnalysisWorkflow
+- Implements BaseWorkflow
+- Pulls 5-year price history for the thesis instrument(s) from IBKR
+- Computes: annualized return, annualized volatility, max drawdown,
+  60-day realized volatility (used later for position sizing)
+- Assesses correlation between instrument price history and the relevant
+  FRED macro series
+- All data cited with IBKR source label and timestamp
+- Tests confirm correct computation of all statistics
+
+TICKET 013 — WebResearchWorkflow
+- Implements BaseWorkflow
+- Runs 3-5 targeted web searches relevant to the thesis
+- Collects up to 10 candidate sources across all searches
+- Ranks sources: cited sources first, then by source quality tier
+- Stores top 3-5 sources as FurtherReading candidates with title, url,
+  source_type, and a one-sentence agent-written annotation
+- All web sources cited with full URL and retrieval date
+- Tests confirm search execution, ranking logic, and annotation generation
+
+TICKET 014 — BacktestWorkflow
+- Implements BaseWorkflow
+- Proxy-based historical analog analysis — NOT a rules-based backtest
+- Consumes analog periods from HistoricalAnalogWorkflow and instrument
+  price history from InstrumentAnalysisWorkflow via WorkflowContext
+- For each analog period computes: total return, annualized return, max
+  drawdown, volatility, and directional correctness vs thesis direction
+- Aggregate output: average return, worst case, best case, win rate,
+  average max drawdown, benchmark comparison (SPY and 60/40) over same periods
+- Output explicitly labeled "Historical Analog Analysis" — never "backtest"
+- Output includes explicit note on statistical limitations when fewer than
+  5 analog periods are available
+- Results stored as JSON in object storage; referenced by ID in workflow_runs
+- All data cited with FRED, OECD, and IBKR source labels
+- Tests confirm correct return/drawdown calculations and benchmark comparison
+
+TICKET 015 — FalsificationGenerationWorkflow
+- Implements BaseWorkflow
+- Generates 3-5 falsification conditions based on thesis content and prior
+  workflow results
+- Each condition includes: description, condition_type (state or event),
+  trigger_type (for event conditions), measurable_proxy, evaluation_logic
+- All qualitative conditions are translated to quantitative proxies
+- Conditions stored to falsification_conditions table linked to thesis
+- chain_operator and chain_group fields populated as null (v2)
+- Tests confirm condition type assignment and proxy translation
+
+TICKET 016 — RecommendationWorkflow
+- Implements BaseWorkflow
+- Consumes all prior WorkflowResult objects from context
+- Produces: Go/No-Go recommendation, one-paragraph rationale, key
+  assumptions list, and confidence level
+- Explicitly cites which workflow outputs informed the recommendation
+- Agent inferences in rationale are flagged
+- Tests confirm recommendation structure and citation of prior results
+
+
+═══════════════════════════════════════════════
+SECTION 4: IDEA PIPELINE — INPUT & INTAKE
+═══════════════════════════════════════════════
+
+TICKET 017 — Idea Input UI & API
+- FastAPI route POST /theses accepts thesis_title, time_horizon, direction,
+  and freeform notes
+- Input validated: all three required fields must be non-empty
+- Thesis saved to database with status 'draft' and pod_id from default pod
+- Server-rendered form page (Jinja2) with three required fields and a large
+  text area for freeform notes
+- Submission redirects to a thesis detail page showing status
+- Tests confirm validation, storage, and status assignment
+
+TICKET 018 — Intake Agent
+- On thesis submission, an agent generates the intake message containing:
+  instrument mapping, one-paragraph thesis restatement, and 2-3 proposed
+  falsification conditions
+- Intake message displayed on thesis detail page in the web UI
+- No email sent at intake stage — the entire intake conversation happens
+  in the UI
+- Thesis status updated to 'intake_sent'
+- User responds via a form on the thesis detail page in the UI only
+- On response: corrections stored, thesis status updated, research workflow
+  queued
+- On timeout (configurable, default 24 hours): research workflow proceeds
+  with original interpretation; thesis flagged with 'intake_unconfirmed'
+- intake_unconfirmed flag is non-dismissible until user explicitly
+  acknowledges it via the UI
+- Tests confirm intake generation, UI response handling, and timeout behavior
+
+TICKET 019 — Research Workflow Orchestration
+- WorkflowRunner triggered automatically after intake confirmation or timeout
+- Runs all 7 core workflows sequentially in order defined in PRD Section 4.3
+- Brief assembled from all WorkflowResult objects and stored
+- Further reading entries saved to further_reading table from
+  WebResearchWorkflow output
+- Thesis status updated to 'researched'
+- Email notification sent to user on brief completion — this is the first
+  and only email in the idea pipeline flow; contains a direct link to the
+  brief; no reply handling
+- Tests confirm end-to-end orchestration from intake to brief completion
+  and email notification sent on completion
+
+
+═══════════════════════════════════════════════
+SECTION 5: TRADE BRIEF
+═══════════════════════════════════════════════
+
+TICKET 020 — Trade Brief Storage & Retrieval
+- Brief assembled from workflow_runs outputs and stored as JSON in object
+  storage; referenced by thesis_id
+- FastAPI route GET /theses/{thesis_id}/brief returns structured brief data
+- Brief structure matches PRD Section 4.4 Tier 1 exactly: summary, instrument,
+  direction, time horizon, backtest stats, assumptions, falsification
+  conditions, recommendation, source index
+- Source index lists all citations from all workflow runs for this thesis
+- Tests confirm brief assembly and all required fields are present
+
+TICKET 021 — Trade Brief UI (Tier 1)
+- Server-rendered brief page displays all Tier 1 fields
+- Falsification conditions displayed with condition_type label
+- Source index rendered at bottom with properly formatted citations
+- Human decision field (Go / No-Go / Hold for review) rendered as buttons
+- On decision: thesis status updated, decision logged to audit_log with
+  timestamp
+- intake_unconfirmed flag displayed prominently if set; dismissal button
+  logs acknowledgment to audit_log
+- Tests confirm all fields render and decision buttons update status correctly
+
+TICKET 022 — Further Reading UI (Tier 3)
+- Further reading section rendered at bottom of brief page
+- Each entry shows: title (hyperlinked), source type badge, and one-sentence
+  annotation
+- Sources ordered: cited sources first, then additional relevant sources
+- Tests confirm correct ordering and all fields present
+
+TICKET 023 — Falsification Condition Editing & Lock Enforcement
+- Falsification conditions are editable (add, remove, modify) only when
+  thesis status is 'approved' — never when 'active' or any other status
+- Edit controls (add, edit, delete buttons) rendered on brief page only
+  when thesis status is 'approved'
+- API endpoints for creating, updating, and deleting conditions return
+  a typed ConditionLockedError if thesis status is 'active'
+- "Test Now" button available on every condition regardless of thesis status;
+  runs the condition evaluator on demand and displays result inline via HTMX:
+  passing or failing, current data value, threshold, and citation
+- Test Now is read-only — it never modifies condition or thesis state
+- Close-and-reopen is the only path to editing a condition on an active thesis; no exceptions
+- Tests confirm: edit endpoints reject active thesis conditions, Test Now works
+  on both approved and active theses, edit controls absent from active thesis brief UI
+
+TICKET 024 — Deep Dive Workflows & UI (Tier 2)
+- SensitivityAnalysisWorkflow, RegimeStressTestWorkflow,
+  PortfolioCorrelationWorkflow, HistoricalAnalogDetailWorkflow implemented
+  as BaseWorkflow subclasses
+- Each workflow registered in workflow_registry
+- Brief page displays a trigger button for each available deep dive
+- On trigger: workflow runs against current thesis; results appended to brief
+  page via HTMX without full page reload
+- Deep dive results include their own citation section
+- Tests confirm each workflow executes and results append correctly
+
+TICKET 025 — Thesis Search & List View
+- Thesis list page shows all theses with: title, status, instrument,
+  direction, created date, condition status (if active)
+- Filterable by status, instrument, and date range
+- Keyword search uses pgvector semantic search on thesis content
+- Embeddings generated for each thesis on creation using Anthropic embeddings
+- Tests confirm filtering, search results, and embedding generation
+
+
+═══════════════════════════════════════════════
+SECTION 6: FALSIFICATION MONITORING
+═══════════════════════════════════════════════
+
+TICKET 026 — State Condition Evaluator
+- ConditionEvaluator class evaluates a single state-type falsification
+  condition against current data
+- Fetches required data from FRED or IBKR based on condition definition
+- Returns: result (passing / falsified), data_value, threshold, citation
+- Result logged to condition_evaluations with full citation
+- Tests confirm correct evaluation logic and citation format for state
+  conditions
+
+TICKET 027 — Event Condition Evaluator
+- EventConditionEvaluator checks whether the condition's trigger_type has
+  fired since last_evaluated_at
+- For scheduled types: queries economic_calendar for releases since
+  last_evaluated_at matching trigger_type
+- For unscheduled types: queries news_events for detected events since
+  last_evaluated_at matching trigger_type
+- If trigger found: evaluates condition and logs result
+- If no trigger: logs result as 'no_trigger' with timestamp
+- Tests confirm both scheduled and unscheduled trigger detection, and
+  correct no_trigger logging
+
+TICKET 028 — IBKR News Poller & LLM Event Classifier
+- Scheduled job polls IBKR news API for headlines since last run
+- LLM classifier reads headlines and assigns zero or one unscheduled
+  trigger_type per headline: TARIFF_ANNOUNCEMENT, FED_SPEECH,
+  GEOPOLITICAL_EVENT, SURPRISE_RATE_MOVE
+- Headlines that match no trigger type are discarded
+- Matched events stored in news_events with: headline, url, detected_at,
+  trigger_type, classifier_confidence
+- User can view and override misclassifications from the web UI
+- Tests confirm classifier output structure and storage; mock LLM for unit
+  tests
+
+TICKET 029 — Daily Monitoring Job
+- APScheduler job runs at market close (4:30pm ET) on trading days
+- For each active thesis: runs all falsification conditions through the
+  appropriate evaluator (state or event)
+- Results logged to condition_evaluations
+- If any condition is falsified: triggers kill authority workflow for
+  that thesis
+- Job execution logged with start time, end time, theses processed,
+  conditions evaluated, and any falsifications triggered
+- Tests confirm job runs all conditions, handles failures gracefully, and
+  triggers kill workflow on falsification
+
+
+═══════════════════════════════════════════════
+SECTION 7: KILL AUTHORITY & ALERTS
+═══════════════════════════════════════════════
+
+TICKET 030 — Kill Authority Workflow
+- KillAuthorityWorkflow checks kill_authority setting on thesis
+- For alert_only: creates alert record, sends email, takes no trading action
+- For auto_close: submits closing order to IBKR, creates alert record,
+  sends email confirming action
+- kill_authority change via UI logged to audit_log with changed_by and
+  timestamp
+- Tests confirm correct behavior for each kill_authority mode
+
+TICKET 031 — Alert Email Delivery
+- AlertEmailService sends email via SMTP (SendGrid or AWS SES)
+- Email contains: thesis title, condition violated, triggering data point
+  with citation, kill_authority setting, action taken, and direct link to
+  brief
+- All sent alerts logged to alerts table with delivery status and timestamp
+- Failed deliveries logged and retried once
+- AlertEmailService implements a pluggable delivery interface (AlertChannel
+  abstract class) so future channels (Slack, SMS) can be added without
+  changing core alert logic
+- Tests mock SMTP and confirm email content, logging, and retry behavior
+
+
+═══════════════════════════════════════════════
+SECTION 8: EXECUTION ENGINE
+═══════════════════════════════════════════════
+
+TICKET 032 — Position Sizer
+- PositionSizer class computes target dollar allocation for a thesis
+- Uses formula from PRD Section 6.2:
+  position_size = (target_vol * nav) / realized_vol_60d
+  position_size = min(position_size, 0.25 * nav)
+- target_vol loaded from pod settings (default 5%)
+- realized_vol_60d fetched from IBKR price history
+- Returns target position size in dollars and number of shares
+- Tests confirm correct formula application, cap enforcement, and correct
+  behavior when volatility data is unavailable
+
+TICKET 033 — Portfolio Manager
+- PortfolioManager class maintains current target portfolio state
+- compute_target_weights() returns target dollar allocation for all active
+  theses using PositionSizer
+- compute_rebalance_orders() diffs target weights against current IBKR
+  positions and returns a list of required orders
+- Orders below the rebalance threshold (1% NAV, from pod settings) are
+  filtered out and logged as skipped
+- Tests confirm correct diff computation, threshold filtering, and order
+  list output
+
+TICKET 034 — Order Executor
+- OrderExecutor submits orders to IBKR Client Portal API
+- Order direction (buy/sell) is always derived from thesis_instruments.direction — never hardcoded
+- Submits limit order at mid-price; waits up to 5 minutes for fill
+- On fill timeout: cancels limit order and resubmits as market order
+- Logs all execution details to trades table: submitted_price, fill_price,
+  fill_time, slippage, order_type
+- Raises typed OrderExecutionError on failure; does not silently swallow
+  errors
+- Tests mock IBKR API and confirm limit-then-market fallback and logging
+
+TICKET 035 — Close Trade Service
+- CloseTrade service method exists in app/services/
+- Accepts thesis_id and close_reason (human_manual, kill_condition, auto_close)
+- Reads direction and role from thesis_instruments for each instrument in the thesis
+- Submits a market sell order for long positions, buy-to-cover for short positions
+- In v1 all positions are long — but close logic must read from thesis_instruments.direction, never assume long
+- Updates thesis status to closed
+- Writes to audit_log with changed_by, timestamp, and close_reason
+- Sends confirmation email via AlertEmailService
+- "Close Trade" button visible on brief page for active theses
+- Button triggers a confirmation modal with Cancel and Confirm
+- No action taken until Confirm clicked; modal dismisses on Cancel
+- Kill authority workflow calls the same CloseTrade method — no separate implementation
+- Tests confirm: full position close order submitted, status updated, audit entry written, email sent, and that human and agent paths call identical service method
+
+TICKET 036 — Weekly Rebalance Job
+- APScheduler job runs at Monday market open (9:35am ET)
+- Calls PortfolioManager.compute_rebalance_orders()
+- Submits all required orders via OrderExecutor
+- Logs rebalance run: orders submitted, orders skipped (below threshold),
+  estimated trading costs
+- Manual rebalance trigger available via POST /portfolio/rebalance (requires
+  confirmation)
+- Tests confirm job execution, order submission, skip logging, and manual
+  trigger
+
+TICKET 037 — Paper vs. Real Mode Enforcement & Position Transition
+- trading_mode field on pod_configs controls all IBKR routing
+- IBKRClient reads trading_mode from pod_configs at request time — never cached
+- UI displays current trading_mode prominently on every page
+- Switching trading_mode requires explicit user action via UI confirmation
+  modal; user must type "CONFIRM REAL TRADING" to proceed
+- Paper → real transition executes in this exact order, each step with its
+  own immediate audit_log entry:
+    1. mode_switch_attempted logged
+    2. Cash check against real IBKR account buying power
+    3. cash_check_passed or cash_check_failed logged with amounts
+    4. If failed: block switch entirely, alert user with shortfall, stop
+    5. If passed: open real positions for all active theses at current sizing
+    6. real_positions_opened logged per confirmed IBKR fill
+    7. Close all paper positions
+    8. paper_positions_closed logged per confirmed close
+    9. trading_mode updated to real in pod_configs
+- Real → paper transition executes in this exact order:
+    1. mode_switch_attempted logged
+    2. Close all real positions
+    3. real_positions_closed logged per confirmed IBKR fill
+    4. trading_mode updated to paper in pod_configs
+    5. mode_switch_completed logged
+    6. Paper account starts fresh — next rebalance populates paper positions
+- Mid-process failures are logged and alerted immediately; no auto-rollback
+- All audit entries written immediately when the step completes — never batched
+- Tests confirm: cash check blocks switch on insufficient funds, each audit
+  entry written at correct step, paper account fresh after real→paper switch,
+  IBKRClient routing correct for each mode
+
+
+═══════════════════════════════════════════════
+SECTION 9: PERFORMANCE MEASUREMENT
+═══════════════════════════════════════════════
+
+TICKET 038 — Daily Performance Snapshot Job
+- APScheduler job runs at market close after the monitoring job
+- Fetches current positions and NAV from IBKR
+- Computes pod-level metrics: NAV, daily NAV change, gross exposure,
+  net exposure
+- Stores snapshot to portfolio_snapshots table
+- Tests confirm snapshot computation and storage
+
+TICKET 039 — Performance Metrics Calculator
+- PerformanceCalculator class computes rolling metrics from portfolio_snapshots
+- Pod-level: rolling Sharpe (30d, 90d, 1Y), max drawdown (rolling and
+  since inception), benchmark comparison vs SPY and 60/40
+- Thesis-level: P&L attribution, return vs backtest expectation, days in
+  trade, condition status summary
+- Tests confirm correct Sharpe, drawdown, and attribution calculations
+  against known inputs
+
+
+═══════════════════════════════════════════════
+SECTION 10: DASHBOARD & NAVIGATION
+═══════════════════════════════════════════════
+
+TICKET 040 — Dashboard Home Page
+- Server-rendered home page shows:
+  - Pod-level performance summary: NAV, daily change, rolling Sharpe (30d),
+    max drawdown since inception, benchmark comparison
+  - Table of active theses with columns: title, instrument, direction, P&L,
+    days in trade, condition status (all passing / N at risk / falsified)
+  - trading_mode badge displayed prominently
+- Closed theses are hidden from the dashboard 24 hours after all associated positions are confirmed flat by IBKR
+- Clicking a thesis row navigates to the brief page
+- Performance data loaded from PerformanceCalculator
+- Tests confirm all metrics render and thesis table is correct
+
+TICKET 041 — Navigation & Layout
+- Consistent navigation header on all pages: Dashboard, Theses, New Idea,
+  Alerts
+- Alerts page shows alert history from alerts table with delivery status
+- All pages display current trading_mode in the header
+- HTMX used for partial page updates (deep dive results, condition status
+  refresh) — no full-page reloads for these interactions
+- Tests confirm navigation links and HTMX partial updates
+
+
+═══════════════════════════════════════════════
+SECTION 11: SYSTEM HARDENING
+═══════════════════════════════════════════════
+
+TICKET 042 — Audit Log Enforcement
+- All state changes verified to write to audit_log: thesis status changes,
+  kill_authority changes, go/no-go decisions, trading_mode changes,
+  intake acknowledgments
+- audit_log table has a database-level trigger preventing UPDATE and DELETE
+- changed_by field populated on all writes (user_id or agent identifier)
+- Tests confirm audit entries are created for all tracked actions and that
+  delete/update on audit_log raises an error
+
+TICKET 043 — Error Handling & Observability
+- All external API calls (IBKR, FRED, web search, SMTP) wrapped in typed
+  exception classes with clear error messages
+- Failed workflow steps logged with full error context; runner continues
+  to next step
+- Failed order executions logged and surfaced as alerts to the user
+- Application logs structured as JSON with timestamp, level, and context
+- Tests confirm error propagation, logging format, and that failures do not
+  crash the application
+
+TICKET 044 — End-to-End Integration Test
+- A full integration test runs the complete idea pipeline from submission
+  to brief generation using mocked external APIs
+- Test confirms: intake generated, research workflows run in order,
+  brief assembled with all required fields, further reading populated,
+  falsification conditions stored
+- A separate integration test runs the daily monitoring job and confirms
+  a falsified condition triggers an alert
+- A separate integration test runs the weekly rebalance and confirms orders
+  are submitted and logged correctly
+PRDEOF
