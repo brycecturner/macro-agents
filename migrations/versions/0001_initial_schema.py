@@ -24,38 +24,10 @@ def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
     # ------------------------------------------------------------------
-    # 2. Create PostgreSQL enum types
-    # ------------------------------------------------------------------
-    op.execute("CREATE TYPE trading_mode_enum AS ENUM ('paper', 'real')")
-    op.execute("CREATE TYPE kill_authority_enum AS ENUM ('alert_only', 'auto_close')")
-    op.execute(
-        "CREATE TYPE pod_membership_role_enum AS ENUM ('pm', 'analyst', 'readonly')"
-    )
-    op.execute(
-        "CREATE TYPE thesis_status_enum AS ENUM ("
-        "'draft', 'intake_sent', 'researched', 'approved',"
-        " 'active', 'closed', 'rejected')"
-    )
-    op.execute("CREATE TYPE direction_enum AS ENUM ('long', 'short')")
-    op.execute(
-        "CREATE TYPE instrument_role_enum AS ENUM ('primary', 'hedge', 'secondary')"
-    )
-    op.execute("CREATE TYPE condition_type_enum AS ENUM ('state', 'event')")
-    op.execute("CREATE TYPE chain_operator_enum AS ENUM ('AND', 'OR')")
-    op.execute(
-        "CREATE TYPE condition_result_enum AS ENUM ('passing', 'failing', 'no_trigger')"
-    )
-    op.execute(
-        "CREATE TYPE workflow_status_enum AS ENUM ('completed', 'failed', 'partial')"
-    )
-    op.execute("CREATE TYPE order_type_enum AS ENUM ('limit', 'market')")
-    op.execute(
-        "CREATE TYPE close_reason_enum AS ENUM "
-        "('rebalance', 'kill_condition', 'auto_close', 'human_manual')"
-    )
-
-    # ------------------------------------------------------------------
-    # 3. Create tables (FK dependency order)
+    # 2. Create tables (FK dependency order)
+    # Enum types are created automatically by SQLAlchemy on first use
+    # (create_type=True is the default). Subsequent tables that reuse
+    # the same enum set create_type=False to avoid duplicate creation.
     # ------------------------------------------------------------------
 
     # pods — top-level entity; all other core tables reference it
@@ -97,6 +69,7 @@ def upgrade() -> None:
     )
 
     # pod_configs — one row per pod, all operational parameters
+    # First use of: trading_mode_enum, kill_authority_enum
     op.create_table(
         "pod_configs",
         sa.Column(
@@ -113,12 +86,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             "trading_mode",
-            sa.Enum(
-                "paper",
-                "real",
-                name="trading_mode_enum",
-                create_type=False,
-            ),
+            sa.Enum("paper", "real", name="trading_mode_enum"),
             nullable=False,
         ),
         sa.Column("target_vol_per_position", sa.Float, nullable=False),
@@ -128,12 +96,7 @@ def upgrade() -> None:
         sa.Column("intake_timeout_hours", sa.Integer, nullable=False),
         sa.Column(
             "kill_authority_default",
-            sa.Enum(
-                "alert_only",
-                "auto_close",
-                name="kill_authority_enum",
-                create_type=False,
-            ),
+            sa.Enum("alert_only", "auto_close", name="kill_authority_enum"),
             nullable=False,
         ),
         sa.Column("vol_lookback_days", sa.Integer, nullable=False),
@@ -147,6 +110,7 @@ def upgrade() -> None:
     )
 
     # pod_memberships — join table for users ↔ pods
+    # First use of: pod_membership_role_enum
     op.create_table(
         "pod_memberships",
         sa.Column(
@@ -169,13 +133,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             "role",
-            sa.Enum(
-                "pm",
-                "analyst",
-                "readonly",
-                name="pod_membership_role_enum",
-                create_type=False,
-            ),
+            sa.Enum("pm", "analyst", "readonly", name="pod_membership_role_enum"),
             nullable=False,
         ),
         sa.Column(
@@ -187,6 +145,8 @@ def upgrade() -> None:
     )
 
     # theses — core idea entity; pgvector embedding for semantic search
+    # First use of: direction_enum, thesis_status_enum
+    # Reuses: kill_authority_enum (create_type=False)
     op.create_table(
         "theses",
         sa.Column(
@@ -205,7 +165,7 @@ def upgrade() -> None:
         sa.Column("time_horizon", sa.String(100), nullable=False),
         sa.Column(
             "direction",
-            sa.Enum("long", "short", name="direction_enum", create_type=False),
+            sa.Enum("long", "short", name="direction_enum"),
             nullable=False,
         ),
         sa.Column("notes", sa.Text, nullable=True),
@@ -220,7 +180,6 @@ def upgrade() -> None:
                 "closed",
                 "rejected",
                 name="thesis_status_enum",
-                create_type=False,
             ),
             nullable=False,
         ),
@@ -256,6 +215,8 @@ def upgrade() -> None:
     op.execute("ALTER TABLE theses ADD COLUMN embedding vector(1536)")
 
     # thesis_instruments — ETF(s) associated with a thesis
+    # First use of: instrument_role_enum
+    # Reuses: direction_enum (create_type=False)
     op.create_table(
         "thesis_instruments",
         sa.Column(
@@ -278,18 +239,13 @@ def upgrade() -> None:
         ),
         sa.Column(
             "role",
-            sa.Enum(
-                "primary",
-                "hedge",
-                "secondary",
-                name="instrument_role_enum",
-                create_type=False,
-            ),
+            sa.Enum("primary", "hedge", "secondary", name="instrument_role_enum"),
             nullable=False,
         ),
     )
 
     # falsification_conditions — kill conditions for each thesis
+    # First use of: condition_type_enum, chain_operator_enum
     op.create_table(
         "falsification_conditions",
         sa.Column(
@@ -307,7 +263,7 @@ def upgrade() -> None:
         sa.Column("description", sa.Text, nullable=False),
         sa.Column(
             "condition_type",
-            sa.Enum("state", "event", name="condition_type_enum", create_type=False),
+            sa.Enum("state", "event", name="condition_type_enum"),
             nullable=False,
         ),
         sa.Column("trigger_type", sa.String(50), nullable=True),
@@ -316,7 +272,7 @@ def upgrade() -> None:
         # Nullable in v1 — reserved for v2 condition chain logic
         sa.Column(
             "chain_operator",
-            sa.Enum("AND", "OR", name="chain_operator_enum", create_type=False),
+            sa.Enum("AND", "OR", name="chain_operator_enum"),
             nullable=True,
         ),
         # Nullable in v1 — reserved for v2 condition chain grouping
@@ -331,6 +287,7 @@ def upgrade() -> None:
     )
 
     # condition_evaluations — daily sweep log per condition
+    # First use of: condition_result_enum
     op.create_table(
         "condition_evaluations",
         sa.Column(
@@ -353,13 +310,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             "result",
-            sa.Enum(
-                "passing",
-                "failing",
-                "no_trigger",
-                name="condition_result_enum",
-                create_type=False,
-            ),
+            sa.Enum("passing", "failing", "no_trigger", name="condition_result_enum"),
             nullable=False,
         ),
         sa.Column("data_point", sa.Text, nullable=True),
@@ -393,6 +344,7 @@ def upgrade() -> None:
     )
 
     # workflow_runs — log of all workflow executions
+    # First use of: workflow_status_enum
     op.create_table(
         "workflow_runs",
         sa.Column(
@@ -410,13 +362,7 @@ def upgrade() -> None:
         sa.Column("workflow_name", sa.String(100), nullable=False),
         sa.Column(
             "status",
-            sa.Enum(
-                "completed",
-                "failed",
-                "partial",
-                name="workflow_status_enum",
-                create_type=False,
-            ),
+            sa.Enum("completed", "failed", "partial", name="workflow_status_enum"),
             nullable=False,
         ),
         sa.Column("structured_output", postgresql.JSONB, nullable=True),
@@ -467,6 +413,7 @@ def upgrade() -> None:
     )
 
     # positions — real/paper positions
+    # Reuses: direction_enum, trading_mode_enum (both create_type=False)
     op.create_table(
         "positions",
         sa.Column(
@@ -515,6 +462,8 @@ def upgrade() -> None:
     )
 
     # trades — execution log
+    # First use of: order_type_enum, close_reason_enum
+    # Reuses: direction_enum (create_type=False)
     op.create_table(
         "trades",
         sa.Column(
@@ -549,7 +498,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             "order_type",
-            sa.Enum("limit", "market", name="order_type_enum", create_type=False),
+            sa.Enum("limit", "market", name="order_type_enum"),
             nullable=False,
         ),
         sa.Column("submitted_price", sa.Float, nullable=False),
@@ -564,7 +513,6 @@ def upgrade() -> None:
                 "auto_close",
                 "human_manual",
                 name="close_reason_enum",
-                create_type=False,
             ),
             nullable=True,
         ),

@@ -15,6 +15,12 @@ services:
     volumes:
       - .:/app
     command: sh -c "uv sync --frozen && uv run alembic upgrade head && uv run python scripts/seed.py && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   db:
     image: pgvector/pgvector:pg16
