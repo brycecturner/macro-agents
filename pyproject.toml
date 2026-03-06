@@ -26,6 +26,8 @@ dependencies = [
     "apscheduler>=3.10.0",
     # Async email for alert delivery
     "aiosmtplib>=3.0.0",
+    # FRED API wrapper — macro time series data for research workflows
+    "fredapi>=0.5.2",
 ]
 
 [dependency-groups]
