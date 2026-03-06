@@ -1,7 +1,16 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -17,18 +26,24 @@ class EconomicCalendar(Base):
 
     Supported release types: CPI_RELEASE, FOMC_DECISION, NFP_RELEASE,
     PMI_RELEASE, GDP_RELEASE, PCE_RELEASE
+
+    actual_date is null for future releases and populated (= scheduled_date)
+    once the release date has passed.
     """
 
     __tablename__ = "economic_calendar"
+    __table_args__ = (
+        UniqueConstraint(
+            "release_type", "scheduled_date", name="uq_economic_calendar_type_date"
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     release_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    release_date: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    scheduled_date: Mapped[date] = mapped_column(Date, nullable=False)
+    actual_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

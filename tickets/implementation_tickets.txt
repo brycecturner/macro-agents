@@ -17,7 +17,7 @@ TICKET 001 — Project Scaffold [DONE]
 - No requirements.txt exists in the repository
 - README documents how to run the project locally from scratch
 
-TICKET 002 — Database Schema & Migrations
+TICKET 002 — Database Schema & Migrations [DONE]
 - Alembic initialized and connected to the PostgreSQL instance
 - All tables from PRD Section 4.6 created via versioned migration files:
   pods, users, pod_memberships, theses, thesis_instruments,
@@ -33,7 +33,7 @@ TICKET 002 — Database Schema & Migrations
 - Seed script creates one default pod, one default user, and one pod_configs row with all default values from PRD Section 9.2
 - pod_configs table has one row per pod with all parameters from PRD Section 9.2
 
-TICKET 003 — Configuration, Settings & Trading Calendar Module
+TICKET 003 — Configuration, Settings & Trading Calendar Module [DONE]
 - Infrastructure config (API keys, DB URL, etc.) loaded from .env at startup via a Settings Pydantic model
 - PodSettings Pydantic model loads all operational parameters from pod_configs at request time
 - No service or workflow reads pod_configs directly — all receive a PodSettings object
@@ -49,7 +49,7 @@ TICKET 003 — Configuration, Settings & Trading Calendar Module
 SECTION 2: DATA INTEGRATIONS
 ═══════════════════════════════════════════════
 
-TICKET 004 — FRED API Client
+TICKET 004 — FRED API Client [DONE]
 - FREDClient class wraps the fredapi library
 - Methods: get_series(series_id, start_date, end_date), get_release_dates(release_id)
 - All responses include retrieval timestamp for citation purposes
