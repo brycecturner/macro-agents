@@ -14,6 +14,7 @@ services:
         condition: service_healthy
     volumes:
       - .:/app
+      - /app/.venv  # isolates container venv from Windows host — prevents Linux symlinks (lib64) polluting the host .venv
     command: sh -c "uv sync --frozen && uv run alembic upgrade head && uv run python scripts/seed.py && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
