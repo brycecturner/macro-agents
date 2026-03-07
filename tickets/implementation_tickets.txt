@@ -58,7 +58,7 @@ TICKET 004 — FRED API Client [DONE]
   workflow run
 - Tests mock the API and confirm correct data parsing and error handling
 
-TICKET 005 — FRED Economic Calendar
+TICKET 005 — FRED Economic Calendar [DONE]
 - Script fetches upcoming and recent release dates from FRED for all
   supported scheduled trigger types: CPI_RELEASE, FOMC_DECISION,
   NFP_RELEASE, PMI_RELEASE, GDP_RELEASE, PCE_RELEASE
