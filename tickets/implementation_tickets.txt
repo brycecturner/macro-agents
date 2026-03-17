@@ -67,7 +67,7 @@ TICKET 005 — FRED Economic Calendar [DONE]
 - Script is idempotent — safe to run repeatedly without duplicating rows
 - Tests confirm correct parsing and storage of release dates
 
-TICKET 005b — OECD API Client
+TICKET 005b — OECD API Client [DONE]
 - OECDClient class wraps the OECD JSON RESTful API (no library required,
   direct HTTP calls via httpx)
 - Methods: get_series(dataset, subject, country, start_date, end_date)
@@ -78,7 +78,7 @@ TICKET 005b — OECD API Client
 - Results cached locally within a single workflow run
 - Tests mock the API and confirm correct parsing and error handling
 
-TICKET 006 — IBKR Client Portal API Client
+TICKET 006 — IBKR Client Portal API Client [DONE]
 - IBKRClient class wraps the IBKR Client Portal REST API
 - Methods: get_positions(), get_account_summary(), get_price_history(symbol,
   period, bar_size), submit_order(order), cancel_order(order_id),
