@@ -1,12 +1,31 @@
+import logging
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import get_db, get_session_factory
+from app.workflows.runner import register_workflows
 
-app = FastAPI(title="Macro Agents", version="0.1.0")
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db = get_session_factory()()
+    try:
+        register_workflows(db)
+    except Exception:
+        logger.exception("Failed to register workflows at startup")
+    finally:
+        db.close()
+
+    yield
+
+
+app = FastAPI(title="Macro Agents", version="0.1.0", lifespan=lifespan)
 
 
 @app.get("/health")

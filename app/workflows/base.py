@@ -78,6 +78,9 @@ class WorkflowContext:
     thesis: Thesis
     prior_results: list[WorkflowResult] = field(default_factory=list)
     pod_settings: PodSettings | None = None
+    # Set to True when any workflow in the chain fails; subsequent workflows
+    # can inspect this to adjust their behaviour.
+    has_partial_results: bool = False
 
     def get_result(self, workflow_name: str) -> WorkflowResult | None:
         """Return the most recent result for a named workflow, or None."""

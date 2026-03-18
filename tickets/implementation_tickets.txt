@@ -116,7 +116,7 @@ TICKET 008 — BaseWorkflow Class & WorkflowResult [DONE]
 - Attempting to instantiate BaseWorkflow directly raises NotImplementedError
 - Tests confirm interface contract is enforced
 
-TICKET 009 — Workflow Registry
+TICKET 009 — Workflow Registry [DONE]
 - workflow_registry table is populated at app startup by scanning the
   /workflows directory and registering all BaseWorkflow subclasses
 - WorkflowRunner class accepts a thesis and executes a named list of
