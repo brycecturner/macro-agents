@@ -90,7 +90,7 @@ TICKET 006 — IBKR Client Portal API Client [DONE]
 - Client raises a typed IBKRClientError with status code on failure
 - Tests mock the API and confirm correct routing between paper and real modes
 
-TICKET 007 — Web Search Integration
+TICKET 007 — Web Search Integration [DONE]
 - WebSearchClient wraps the Anthropic web search tool
 - Method: search(query) returns a list of SearchResult objects, each with
   url, title, snippet, and retrieval_date
@@ -104,7 +104,7 @@ TICKET 007 — Web Search Integration
 SECTION 3: WORKFLOW ENGINE
 ═══════════════════════════════════════════════
 
-TICKET 008 — BaseWorkflow Class & WorkflowResult
+TICKET 008 — BaseWorkflow Class & WorkflowResult [DONE]
 - BaseWorkflow abstract class exists with interface matching PRD Section 4.5:
   name, description, required_inputs, execute(thesis, context)
 - WorkflowResult dataclass exists with fields: workflow_name, status,
