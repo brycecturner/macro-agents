@@ -140,26 +140,34 @@ class WorkflowRunner:
         Returns the list of WorkflowResult objects (one per class, including
         failed ones so callers can inspect the full run history).
         """
-        context = WorkflowContext(thesis=thesis, pod_settings=pod_settings)
+        context = WorkflowContext(thesis=thesis, pod_settings=pod_settings, db=self._db)
 
         for workflow_cls in workflow_classes:
             workflow = workflow_cls()
+            run_id = uuid.uuid4()
             started_at = datetime.now(UTC)
+
+            # Create the run record before execute() so AnthropicClient can
+            # log the correct workflow_run_id FK in llm_usage_log.
+            run_record = WorkflowRun(
+                id=run_id,
+                thesis_id=thesis.id,
+                workflow_name=workflow.name,
+                status=DBWorkflowStatus.failed,  # safe default; updated on success
+                started_at=started_at,
+            )
+            self._db.add(run_record)
+            self._db.flush()
+            context.current_workflow_run_id = run_id
 
             try:
                 result = workflow.execute(thesis, context)
-                run_record = WorkflowRun(
-                    id=uuid.uuid4(),
-                    thesis_id=thesis.id,
-                    workflow_name=workflow.name,
-                    status=DBWorkflowStatus.completed,
-                    structured_output=result.structured_output,
-                    citations=_serialize_citations(result.citations),
-                    agent_inferences=result.agent_inferences,
-                    raw_output=result.raw_output,
-                    started_at=started_at,
-                    completed_at=datetime.now(UTC),
-                )
+                run_record.status = DBWorkflowStatus.completed
+                run_record.structured_output = result.structured_output
+                run_record.citations = _serialize_citations(result.citations)
+                run_record.agent_inferences = result.agent_inferences
+                run_record.raw_output = result.raw_output
+                run_record.completed_at = datetime.now(UTC)
             except Exception as exc:
                 logger.exception(
                     "Workflow %s failed for thesis %s", workflow.name, thesis.id
@@ -172,22 +180,12 @@ class WorkflowRunner:
                     agent_inferences=[],
                     raw_output=str(exc),
                 )
-                run_record = WorkflowRun(
-                    id=uuid.uuid4(),
-                    thesis_id=thesis.id,
-                    workflow_name=workflow.name,
-                    status=DBWorkflowStatus.failed,
-                    structured_output=None,
-                    citations=None,
-                    agent_inferences=None,
-                    raw_output=str(exc),
-                    started_at=started_at,
-                    completed_at=datetime.now(UTC),
-                )
+                run_record.raw_output = str(exc)
+                run_record.completed_at = datetime.now(UTC)
                 context.has_partial_results = True
 
-            self._db.add(run_record)
             self._db.commit()
+            context.current_workflow_run_id = None
             context.prior_results.append(result)
 
         return context.prior_results

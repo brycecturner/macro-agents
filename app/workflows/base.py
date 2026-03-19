@@ -7,6 +7,7 @@ workflows can consume prior results without reaching into global state.
 
 from __future__ import annotations
 
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date
@@ -14,6 +15,8 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
     from app.core.pod_settings import PodSettings
     from app.models.thesis import Thesis
 
@@ -81,6 +84,13 @@ class WorkflowContext:
     # Set to True when any workflow in the chain fails; subsequent workflows
     # can inspect this to adjust their behaviour.
     has_partial_results: bool = False
+    # SQLAlchemy Session — threaded through by WorkflowRunner so workflows
+    # can pass it to AnthropicClient for llm_usage_log writes. Any is
+    # unavoidable: importing Session would couple base.py to SQLAlchemy.
+    db: Session | None = None
+    # Set by WorkflowRunner before each execute() call so workflows can pass
+    # the correct FK when logging Anthropic API calls to llm_usage_log.
+    current_workflow_run_id: uuid.UUID | None = None
 
     def get_result(self, workflow_name: str) -> WorkflowResult | None:
         """Return the most recent result for a named workflow, or None."""

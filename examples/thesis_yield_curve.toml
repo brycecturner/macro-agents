@@ -1,0 +1,19 @@
+# Example thesis input for run_workflow.py
+# Run with:
+#   uv run python scripts/run_workflow.py --thesis examples/thesis_yield_curve.toml
+
+title = "Yield Curve Steepener"
+direction = "long"
+time_horizon = "6-9 months"
+notes = """
+Long TLT (20+ year Treasury ETF) as the yield curve steepens from historically
+inverted levels. The 10Y-2Y spread has been negative for an extended period;
+mean reversion is likely as the Fed begins cutting rates.
+
+Key assumptions:
+- Fed cuts at least twice over the next 3 meetings
+- Inflation continues trending toward 2% target
+- No significant credit event that would cause a flight from duration
+
+Primary instrument: TLT (long)
+"""
