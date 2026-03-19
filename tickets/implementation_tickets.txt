@@ -130,7 +130,7 @@ TICKET 009 — Workflow Registry [DONE]
 - Tests confirm sequential execution, context accumulation, and failure
   handling
 
-TICKET 010 — MacroContextWorkflow
+TICKET 010 — MacroContextWorkflow [DONE]
 - Implements BaseWorkflow
 - Pulls FRED series relevant to the thesis based on thesis content:
   at minimum yield curve (T10Y2Y), CPI (CPIAUCSL), Fed Funds Rate (FEDFUNDS),
