@@ -12,7 +12,11 @@ import pytest
 
 from app.integrations.anthropic_client import AnthropicResponse
 from app.integrations.fred_client import FREDClientError, FREDSeriesResult
-from app.integrations.oecd_client import OECDClientError, OECDSeriesResult
+from app.integrations.oecd_client import (
+    OECDClientError,
+    OECDSeriesResult,
+    OECDSeriesSpec,
+)
 from app.workflows.base import CitationSourceType, WorkflowContext, WorkflowStatus
 from app.workflows.macro_context import (
     _FRED_CORE_SERIES,
@@ -56,13 +60,16 @@ def _fred_result(
     )
 
 
-def _oecd_result(
-    dataset: str, subject: str, country: str, values: list[float]
-) -> OECDSeriesResult:
+def _oecd_result(values: list[float]) -> OECDSeriesResult:
+    spec = OECDSeriesSpec(
+        agency="OECD.SDD.STES",
+        dataflow="DSD_STES@DF_CLI",
+        version="4.1",
+        dimension_key="OECD.M.LI...AA.IX..H",
+        label="OECD Composite Leading Indicator",
+    )
     return OECDSeriesResult(
-        dataset=dataset,
-        subject=subject,
-        country=country,
+        spec=spec,
         data=_make_series(values),
         retrieved_at=datetime(2024, 6, 1, tzinfo=UTC),
     )
@@ -322,9 +329,7 @@ class TestMacroContextWorkflowOECD:
 
     def test_oecd_series_included_when_client_provided(self):
         oecd = MagicMock()
-        oecd.get_series.return_value = _oecd_result(
-            "MEI_FIN", "IRSTCB01", "EA19", [1.0] * 25
-        )
+        oecd.get_series.return_value = _oecd_result([1.0] * 25)
 
         workflow = MacroContextWorkflow(
             fred_client=_make_fred_client(),
@@ -340,9 +345,7 @@ class TestMacroContextWorkflowOECD:
 
     def test_oecd_citations_have_oecd_source_type(self):
         oecd = MagicMock()
-        oecd.get_series.return_value = _oecd_result(
-            "MEI_FIN", "IRSTCB01", "EA19", [1.0] * 25
-        )
+        oecd.get_series.return_value = _oecd_result([1.0] * 25)
 
         workflow = MacroContextWorkflow(
             fred_client=_make_fred_client(),

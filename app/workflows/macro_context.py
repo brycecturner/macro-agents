@@ -20,7 +20,7 @@ import pandas as pd
 
 from app.integrations.anthropic_client import AnthropicClient
 from app.integrations.fred_client import FREDClient, FREDClientError
-from app.integrations.oecd_client import OECDClient, OECDClientError
+from app.integrations.oecd_client import OECDClient, OECDClientError, OECDSeriesSpec
 from app.workflows.base import (
     BaseWorkflow,
     Citation,
@@ -76,11 +76,32 @@ def _build_user_message(thesis, data_lines: list[str]) -> str:
 _FRED_CORE_SERIES = ["T10Y2Y", "CPIAUCSL", "FEDFUNDS", "UNRATE"]
 
 # Core OECD series fetched when an OECDClient is provided.
-# Each entry is (dataset, subject, country, label).
-_OECD_CORE_SERIES: list[tuple[str, str, str, str]] = [
-    ("MEI_FIN", "IRSTCB01", "EA19", "ECB Policy Rate"),
-    ("PRICES_CPI", "CPALTT01", "EA19", "Eurozone CPI"),
-    ("MEI_CLI", "LOLITOAA", "OECD", "OECD Composite Leading Indicator"),
+# The old stats.oecd.org SDMX-JSON API was shut down 2024-07-01. These specs
+# target the new sdmx.oecd.org REST API. To verify or update any dimension_key,
+# open https://data-explorer.oecd.org, find the indicator, and click the
+# "Developer API" button above the data table to get the exact URL.
+_OECD_CORE_SERIES: list[OECDSeriesSpec] = [
+    OECDSeriesSpec(
+        agency="OECD.SDD.STES",
+        dataflow="DSD_STES@DF_FINMARK",
+        version="4.0",
+        dimension_key="EA19.M.IRSTCB.PA",
+        label="ECB Policy Rate",
+    ),
+    OECDSeriesSpec(
+        agency="OECD.SDD.TPS",
+        dataflow="DSD_PRICES@DF_PRICES_ALL",
+        version="1.0",
+        dimension_key="EA19.A.N.CPI.PA._T.N.",
+        label="Eurozone CPI",
+    ),
+    OECDSeriesSpec(
+        agency="OECD.SDD.STES",
+        dataflow="DSD_STES@DF_CLI",
+        version="4.1",
+        dimension_key="OECD.M.LI...AA.IX..H",
+        label="OECD Composite Leading Indicator",
+    ),
 ]
 
 # Long lookback so HistoricalAnalogWorkflow has decades of data to search.
@@ -267,31 +288,26 @@ class MacroContextWorkflow(BaseWorkflow):
         # --- OECD series (optional) ---
         oecd = self._oecd
         if oecd is not None:
-            for dataset, subject, country, label in _OECD_CORE_SERIES:
+            for spec in _OECD_CORE_SERIES:
                 try:
                     result = oecd.get_series(
-                        dataset=dataset,
-                        subject=subject,
-                        country=country,
+                        spec=spec,
                         start_date=start_date,
                         end_date=end_date,
                     )
                 except OECDClientError:
                     logger.warning(
-                        "Failed to fetch OECD series %s/%s/%s — skipping",
-                        dataset,
-                        subject,
-                        country,
+                        "Failed to fetch OECD series %r — skipping", spec.label
                     )
                     continue
 
-                series_key = f"OECD:{dataset}/{subject}/{country}"
+                series_key = f"OECD:{spec.label}"
                 snap = _process_series(result.data)
                 if snap is None:
                     continue
 
                 snap.series_id = series_key
-                snap.label = label
+                snap.label = spec.label
 
                 series_output[series_key] = _snapshot_to_output(snap)
                 prompt_lines.append(_prompt_line(snap))
@@ -299,7 +315,7 @@ class MacroContextWorkflow(BaseWorkflow):
                     Citation(
                         source_type=CitationSourceType.OECD,
                         label=(
-                            f"OECD:{dataset}/{subject}/{country}, "
+                            f"OECD:{spec.dataflow}/{spec.dimension_key}, "
                             f"retrieved {result.retrieved_at.date()}"
                         ),
                         url=None,
