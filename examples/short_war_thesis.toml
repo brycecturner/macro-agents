@@ -1,0 +1,15 @@
+# Example thesis input for run_workflow.py
+# Run with:
+#   uv run python scripts/run_workflow.py --thesis examples/thesis_yield_curve.toml
+
+title = "Disparate Oil Impact"
+direction = "short"
+time_horizon = "3-6 months"
+notes = """
+The pain from oil prices is not politically sustainable. However, 
+exposure to this shock is not uniform across developed economies. I think it 
+will have more impact on European borrowing costs than the US, and so those are more likely to 
+move when the war ends.
+
+Main instrument: Spreads
+"""
