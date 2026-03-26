@@ -45,7 +45,7 @@ class OECDSeriesSpec:
         agency        = "OECD.SDD.STES"
         dataflow      = "DSD_STES@DF_CLI"
         version       = "4.1"
-        dimension_key = "OECD.M.LI...AA.IX..H"
+        dimension_key = "OECD.M.CCICP.IX._Z.AA.IX._Z.H"
         label         = "OECD Composite Leading Indicator"
     """
 

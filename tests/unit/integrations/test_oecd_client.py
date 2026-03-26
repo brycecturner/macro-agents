@@ -62,7 +62,7 @@ def _make_spec(
     agency: str = "OECD.SDD.STES",
     dataflow: str = "DSD_STES@DF_CLI",
     version: str = "4.1",
-    dimension_key: str = "OECD.M.LI...AA.IX..H",
+    dimension_key: str = "OECD.M.CCICP.IX._Z.AA.IX._Z.H",
 ) -> OECDSeriesSpec:
     return OECDSeriesSpec(
         agency=agency,
@@ -186,7 +186,7 @@ class TestOECDClientRequestParams:
             agency="OECD.SDD.TPS",
             dataflow="DSD_PRICES@DF_PRICES_ALL",
             version="1.0",
-            dimension_key="EA19.A.N.CPI.PA._T.N.",
+            dimension_key="EA20.A.N.CPI.PA._T.N.GY",
         )
         with patch.object(client._http, "get", mock_get):
             client.get_series(spec)
@@ -198,12 +198,12 @@ class TestOECDClientRequestParams:
 
     def test_url_contains_dimension_key(self, client):
         mock_get = MagicMock(return_value=_ok_response())
-        spec = _make_spec(dimension_key="EA19.A.N.CPI.PA._T.N.")
+        spec = _make_spec(dimension_key="EA20.A.N.CPI.PA._T.N.GY")
         with patch.object(client._http, "get", mock_get):
             client.get_series(spec)
 
         url = mock_get.call_args.args[0]
-        assert "EA19.A.N.CPI.PA._T.N." in url
+        assert "EA20.A.N.CPI.PA._T.N.GY" in url
 
     def test_format_param_is_csvfile(self, client):
         mock_get = MagicMock(return_value=_ok_response())
@@ -303,8 +303,10 @@ class TestOECDClientCaching:
     def test_cache_key_varies_by_dimension_key(self, client):
         mock_get = MagicMock(return_value=_ok_response())
         with patch.object(client._http, "get", mock_get):
-            client.get_series(_make_spec(dimension_key="OECD.M.LI...AA.IX..H"))
-            client.get_series(_make_spec(dimension_key="EA19.M.IRSTCB.PA"))
+            client.get_series(_make_spec(dimension_key="OECD.M.CCICP.IX._Z.AA.IX._Z.H"))
+            client.get_series(
+                _make_spec(dimension_key="EA19.M.IRSTCI.PA._Z._Z._Z._Z.N")
+            )
 
         assert mock_get.call_count == 2
 

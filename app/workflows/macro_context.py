@@ -85,21 +85,34 @@ _OECD_CORE_SERIES: list[OECDSeriesSpec] = [
         agency="OECD.SDD.STES",
         dataflow="DSD_STES@DF_FINMARK",
         version="4.0",
-        dimension_key="EA19.M.IRSTCB.PA",
-        label="ECB Policy Rate",
+        # DSD_STES has 9 dimensions: REF_AREA.FREQ.MEASURE.UNIT_MEASURE.ACTIVITY.
+        # ADJUSTMENT.TRANSFORMATION.TIME_HORIZ.METHODOLOGY — unused slots use _Z.
+        # IRSTCB does not exist in this dataflow; IRSTCI is the ECB call/overnight
+        # rate (nearest proxy for the ECB policy rate available here).
+        # EA19 still has data in this series; EA20 is also valid post-2023.
+        dimension_key="EA19.M.IRSTCI.PA._Z._Z._Z._Z.N",
+        label="ECB Policy Rate (Short-term Call Rate)",
     ),
     OECDSeriesSpec(
         agency="OECD.SDD.TPS",
         dataflow="DSD_PRICES@DF_PRICES_ALL",
         version="1.0",
-        dimension_key="EA19.A.N.CPI.PA._T.N.",
+        # DSD_PRICES has 8 dimensions: REF_AREA.FREQ.METHODOLOGY.MEASURE.
+        # UNIT_MEASURE.EXPENDITURE.ADJUSTMENT.TRANSFORMATION.
+        # EA19 aggregate was discontinued; EA20 covers the current eurozone
+        # (Croatia joined Jan 2023). TRANSFORMATION=GY = year-on-year % change.
+        dimension_key="EA20.A.N.CPI.PA._T.N.GY",
         label="Eurozone CPI",
     ),
     OECDSeriesSpec(
         agency="OECD.SDD.STES",
         dataflow="DSD_STES@DF_CLI",
         version="4.1",
-        dimension_key="OECD.M.LI...AA.IX..H",
+        # DSD_STES v4.1 dimensions same as v4.0. Measure is CCICP (Composite
+        # Leading Indicator, amplitude-adjusted) — LI was not a valid code.
+        # ADJUSTMENT=AA (amplitude-adjusted), TRANSFORMATION=IX (index),
+        # METHODOLOGY=H (OECD CLI methodology).
+        dimension_key="OECD.M.CCICP.IX._Z.AA.IX._Z.H",
         label="OECD Composite Leading Indicator",
     ),
 ]
