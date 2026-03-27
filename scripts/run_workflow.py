@@ -4,6 +4,13 @@ Designed for prompt tuning, structured output inspection, and iterating on
 workflow logic before the frontend exists. Uses real API calls (FRED, Anthropic).
 No database required — LLM usage is logged to stdout instead.
 
+Results are always saved to output/<workflow>_<timestamp>.txt with the order:
+  1. Agent Inferences
+  2. Raw LLM Output
+  3. Full Series Data (structured_output with complete historical_data lists)
+
+The terminal print omits full series history to keep output readable.
+
 Usage examples
 --------------
 Run MacroContextWorkflow with a thesis file:
@@ -41,6 +48,7 @@ import time
 import tomllib
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -212,8 +220,11 @@ def _load_workflow_class(name: str):
 # Output formatting
 # ---------------------------------------------------------------------------
 
-
 _DIVIDER = "─" * 72
+_OUTPUT_DIR = Path(__file__).parent.parent / "output"
+
+# Keys whose values are long data lists — suppressed in terminal, kept in file.
+_SERIES_KEYS = {"historical_data", "recent_prompt_data"}
 
 
 def _print_section(title: str) -> None:
@@ -222,15 +233,36 @@ def _print_section(title: str) -> None:
     print(_DIVIDER)
 
 
+def _strip_series(structured_output: dict) -> dict:
+    """Return a copy of structured_output with long series lists replaced by a
+    placeholder, so the terminal stays readable."""
+    result = {}
+    for key, value in structured_output.items():
+        if isinstance(value, list):
+            # Top-level series lists
+            if key in _SERIES_KEYS:
+                result[key] = f"[{len(value)} observations — see saved output file]"
+            else:
+                result[key] = value
+        elif isinstance(value, dict):
+            result[key] = _strip_series(value)
+        else:
+            result[key] = value
+    # Handle list-of-series-dicts (e.g. list of _SeriesSnapshot dicts)
+    return result
+
+
+def _strip_series_list(obj):
+    """Recursively strip series keys from any structure (dict or list of dicts)."""
+    if isinstance(obj, dict):
+        return _strip_series(obj)
+    if isinstance(obj, list):
+        return [_strip_series_list(item) for item in obj]
+    return obj
+
+
 def _print_result(result, elapsed: float) -> None:
     _print_section(f"RESULT  status={result.status}  elapsed={elapsed:.2f}s")
-
-    _print_section("STRUCTURED OUTPUT")
-    print(json.dumps(result.structured_output, indent=2, default=str))
-
-    _print_section(f"CITATIONS  ({len(result.citations)})")
-    for i, c in enumerate(result.citations, 1):
-        print(f"  [{i}] {c.source_type}  {c.label}")
 
     _print_section(f"AGENT INFERENCES  ({len(result.agent_inferences)})")
     for inf in result.agent_inferences:
@@ -239,7 +271,62 @@ def _print_result(result, elapsed: float) -> None:
     _print_section("RAW LLM OUTPUT")
     print(result.raw_output)
 
+    _print_section("STRUCTURED OUTPUT  (series data truncated — see saved file)")
+    stripped = _strip_series_list(result.structured_output)
+    print(json.dumps(stripped, indent=2, default=str))
+
+    _print_section(f"CITATIONS  ({len(result.citations)})")
+    for i, c in enumerate(result.citations, 1):
+        print(f"  [{i}] {c.source_type}  {c.label}")
+
     print(f"\n{_DIVIDER}")
+
+
+def _save_result(result, workflow_name: str, thesis, elapsed: float) -> Path:
+    """Save the full result to output/<workflow>_<timestamp>.txt.
+
+    Order: Thesis → Agent Inferences → Raw LLM Output → Full Series Data.
+    """
+    _OUTPUT_DIR.mkdir(exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_workflow = workflow_name.replace(" ", "_")
+    out_path = _OUTPUT_DIR / f"{safe_workflow}_{timestamp}.txt"
+
+    div = "─" * 72
+
+    with out_path.open("w", encoding="utf-8") as f:
+        f.write(f"{div}\n")
+        f.write(f"  {workflow_name}\n")
+        f.write(f"  Status: {result.status}   Elapsed: {elapsed:.2f}s\n")
+        f.write(f"  Saved:  {datetime.now().isoformat(timespec='seconds')}\n")
+        f.write(f"{div}\n")
+
+        f.write(f"\n{div}\n  THESIS\n{div}\n")
+        f.write(f"  Title:     {thesis.title}\n")
+        f.write(f"  Direction: {thesis.direction.value}\n")
+        f.write(f"  Horizon:   {thesis.time_horizon}\n")
+        if thesis.notes:
+            f.write(f"\n  Notes:\n")
+            for line in thesis.notes.splitlines():
+                f.write(f"    {line}\n")
+
+        f.write(f"\n{div}\n  AGENT INFERENCES  ({len(result.agent_inferences)})\n{div}\n")
+        for inf in result.agent_inferences:
+            f.write(textwrap.fill(f"  • {inf}", width=80, subsequent_indent="    ") + "\n")
+
+        f.write(f"\n{div}\n  RAW LLM OUTPUT\n{div}\n")
+        f.write(result.raw_output)
+        f.write("\n")
+
+        f.write(f"\n{div}\n  FULL SERIES DATA (structured_output)\n{div}\n")
+        f.write(json.dumps(result.structured_output, indent=2, default=str))
+        f.write("\n")
+
+        f.write(f"\n{div}\n  CITATIONS  ({len(result.citations)})\n{div}\n")
+        for i, c in enumerate(result.citations, 1):
+            f.write(f"  [{i}] {c.source_type}  {c.label}\n")
+
+    return out_path
 
 
 # ---------------------------------------------------------------------------
@@ -351,8 +438,10 @@ def main() -> None:
         sys.exit(1)
     elapsed = time.perf_counter() - t0
 
-    # Print full result
+    # Print to terminal (series data truncated) and save full result to file
     _print_result(result, elapsed)
+    out_path = _save_result(result, args.workflow, thesis, elapsed)
+    print(f"\n  Saved to: {out_path}\n")
 
 
 if __name__ == "__main__":

@@ -25,3 +25,6 @@ htmlcov/
 
 # Ruff / Black cache
 .ruff_cache/
+
+# Workflow debug output files
+output/
