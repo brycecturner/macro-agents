@@ -201,6 +201,7 @@ def _load_thesis(args: argparse.Namespace) -> _StubThesis:
 
 _WORKFLOW_REGISTRY: dict[str, str] = {
     "MacroContextWorkflow": "app.workflows.macro_context",
+    "HistoricalAnalogWorkflow": "app.workflows.historical_analog",
 }
 
 
@@ -306,13 +307,17 @@ def _save_result(result, workflow_name: str, thesis, elapsed: float) -> Path:
         f.write(f"  Direction: {thesis.direction.value}\n")
         f.write(f"  Horizon:   {thesis.time_horizon}\n")
         if thesis.notes:
-            f.write(f"\n  Notes:\n")
+            f.write("\n  Notes:\n")
             for line in thesis.notes.splitlines():
                 f.write(f"    {line}\n")
 
-        f.write(f"\n{div}\n  AGENT INFERENCES  ({len(result.agent_inferences)})\n{div}\n")
+        f.write(
+            f"\n{div}\n  AGENT INFERENCES  ({len(result.agent_inferences)})\n{div}\n"
+        )
         for inf in result.agent_inferences:
-            f.write(textwrap.fill(f"  • {inf}", width=80, subsequent_indent="    ") + "\n")
+            f.write(
+                textwrap.fill(f"  • {inf}", width=80, subsequent_indent="    ") + "\n"
+            )
 
         f.write(f"\n{div}\n  RAW LLM OUTPUT\n{div}\n")
         f.write(result.raw_output)
