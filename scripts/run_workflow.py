@@ -1,35 +1,37 @@
-"""Debug runner — execute a single workflow against a thesis and dump full output.
+"""Debug runner — execute workflows up to and including a target workflow.
 
 Designed for prompt tuning, structured output inspection, and iterating on
 workflow logic before the frontend exists. Uses real API calls (FRED, Anthropic).
 No database required — LLM usage is logged to stdout instead.
 
-Results are always saved to output/<workflow>_<timestamp>.txt with the order:
+When you specify a workflow that depends on prior results (e.g. HistoricalAnalog
+requires MacroContext), all predecessors in the pipeline are run first and their
+results are accumulated in context.prior_results automatically.
+
+Results are saved to output/<workflow>_<timestamp>.txt for every step with:
   1. Agent Inferences
   2. Raw LLM Output
   3. Full Series Data (structured_output with complete historical_data lists)
 
 The terminal print omits full series history to keep output readable.
+Predecessor steps print a compact summary; only the target workflow prints full output.
 
 Usage examples
 --------------
 Run MacroContextWorkflow with a thesis file:
     uv run python scripts/run_workflow.py --thesis examples/thesis_yield_curve.toml
 
-Run with inline args:
-    uv run python scripts/run_workflow.py \\
-        --title "Yield Curve Steepener" \\
-        --direction long \\
-        --horizon "6 months" \\
-        --notes "Long TLT as yield curve steepens."
-
-Include OECD data:
-    uv run python scripts/run_workflow.py \\
-        --thesis examples/thesis_yield_curve.toml --with-oecd
-
-Run a different workflow (once implemented):
+Run HistoricalAnalog (MacroContext runs first automatically):
     uv run python scripts/run_workflow.py --workflow HistoricalAnalogWorkflow \\
         --thesis examples/thesis_yield_curve.toml
+
+Run WebResearch (MacroContext → HistoricalAnalog → InstrumentAnalysis run first):
+    uv run python scripts/run_workflow.py --workflow WebResearchWorkflow \\
+        --thesis examples/thesis_yield_curve.toml
+
+Include OECD data (used by MacroContextWorkflow):
+    uv run python scripts/run_workflow.py \\
+        --thesis examples/thesis_yield_curve.toml --with-oecd
 
 Control log verbosity:
     uv run python scripts/run_workflow.py \\
@@ -196,25 +198,56 @@ def _load_thesis(args: argparse.Namespace) -> _StubThesis:
 
 
 # ---------------------------------------------------------------------------
-# Workflow discovery
+# Workflow pipeline — ordered list defines execution sequence
 # ---------------------------------------------------------------------------
 
-_WORKFLOW_REGISTRY: dict[str, str] = {
-    "MacroContextWorkflow": "app.workflows.macro_context",
-    "HistoricalAnalogWorkflow": "app.workflows.historical_analog",
-}
+# Each entry: (class_name, module_path).  Order here IS the pipeline order.
+PIPELINE: list[tuple[str, str]] = [
+    ("MacroContextWorkflow", "app.workflows.macro_context"),
+    ("HistoricalAnalogWorkflow", "app.workflows.historical_analog"),
+    ("InstrumentAnalysisWorkflow", "app.workflows.instrument_analysis"),
+    ("WebResearchWorkflow", "app.workflows.web_research"),
+]
+
+_PIPELINE_NAMES = [name for name, _ in PIPELINE]
 
 
 def _load_workflow_class(name: str):
-    if name not in _WORKFLOW_REGISTRY:
+    for cls_name, module_path in PIPELINE:
+        if cls_name == name:
+            module = importlib.import_module(module_path)
+            return getattr(module, cls_name)
+    logger.error(
+        "Unknown workflow: %r. Available: %s",
+        name,
+        _PIPELINE_NAMES,
+    )
+    sys.exit(1)
+
+
+def _pipeline_slice(target: str) -> list[str]:
+    """Return the ordered list of workflow names to run, up to and including target."""
+    try:
+        idx = _PIPELINE_NAMES.index(target)
+    except ValueError:
         logger.error(
             "Unknown workflow: %r. Available: %s",
-            name,
-            list(_WORKFLOW_REGISTRY.keys()),
+            target,
+            _PIPELINE_NAMES,
         )
         sys.exit(1)
-    module = importlib.import_module(_WORKFLOW_REGISTRY[name])
-    return getattr(module, name)
+    return _PIPELINE_NAMES[: idx + 1]
+
+
+def _instantiate_workflow(name: str, clients: dict):
+    """Instantiate a workflow class, passing only the clients it accepts."""
+    cls = _load_workflow_class(name)
+    import inspect
+
+    sig = inspect.signature(cls.__init__)
+    params = set(sig.parameters.keys()) - {"self"}
+    kwargs = {k: v for k, v in clients.items() if k in params}
+    return cls(**kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -382,7 +415,6 @@ def main() -> None:
     _setup_logging(args.log_level)
 
     logger.info("=== Workflow Debug Runner ===")
-    logger.info("Workflow: %s", args.workflow)
 
     # Load settings (.env)
     from app.core.settings import get_settings
@@ -397,44 +429,67 @@ def main() -> None:
     # Build thesis
     thesis = _load_thesis(args)
 
-    # Build clients
+    # Build all available clients up front
     from app.integrations.anthropic_client import AnthropicClient
     from app.integrations.fred_client import FREDClient
     from app.integrations.oecd_client import OECDClient
-
-    fred = FREDClient(api_key=settings.fred_api_key)
-    logger.debug("FREDClient ready")
-
-    oecd = OECDClient() if args.with_oecd else None
-    if oecd:
-        logger.debug("OECDClient ready")
+    from app.integrations.web_search_client import WebSearchClient
 
     stub_db = _StubDB()
-    anthropic = AnthropicClient(api_key=settings.anthropic_api_key, db=stub_db)
-    logger.debug("AnthropicClient ready")
+    clients: dict = {
+        "anthropic_client": AnthropicClient(
+            api_key=settings.anthropic_api_key, db=stub_db
+        ),
+        "fred_client": FREDClient(api_key=settings.fred_api_key),
+        "web_search_client": WebSearchClient(api_key=settings.anthropic_api_key),
+    }
+    if args.with_oecd:
+        clients["oecd_client"] = OECDClient()
+        logger.debug("OECDClient ready")
+    logger.debug("All clients ready")
 
-    # Build workflow
-    workflow_cls = _load_workflow_class(args.workflow)
+    # Determine which workflows to run (all predecessors + target)
+    steps = _pipeline_slice(args.workflow)
+    target = steps[-1]
+    predecessors = steps[:-1]
 
-    # Wire up clients — MacroContextWorkflow accepts these kwargs; other
-    # workflows may have a different signature as they're implemented.
-    init_kwargs: dict = {"anthropic_client": anthropic}
-    if hasattr(workflow_cls.__init__, "__code__"):
-        params = workflow_cls.__init__.__code__.co_varnames
-        if "fred_client" in params:
-            init_kwargs["fred_client"] = fred
-        if "oecd_client" in params and oecd is not None:
-            init_kwargs["oecd_client"] = oecd
+    if predecessors:
+        logger.info(
+            "Pipeline: %s",
+            " → ".join(steps),
+        )
+    else:
+        logger.info("Running: %s", target)
 
-    workflow = workflow_cls(**init_kwargs)
-    logger.info("Running %s...", args.workflow)
-
-    # Build context (no DB needed — WorkflowRunner would normally provide this)
+    # Build context once; prior_results accumulates across steps
     from app.workflows.base import WorkflowContext
 
     context = WorkflowContext(thesis=thesis, db=stub_db)
 
-    # Execute
+    # Run predecessor workflows, accumulating results into context
+    for step_name in predecessors:
+        logger.info("--- Predecessor: %s ---", step_name)
+        workflow = _instantiate_workflow(step_name, clients)
+        t0 = time.perf_counter()
+        try:
+            result = workflow.execute(thesis, context)
+        except Exception as exc:
+            logger.exception("Predecessor %s raised an exception: %s", step_name, exc)
+            sys.exit(1)
+        elapsed = time.perf_counter() - t0
+        context.prior_results.append(result)
+        out_path = _save_result(result, step_name, thesis, elapsed)
+        logger.info(
+            "  %s  status=%s  elapsed=%.2fs  saved=%s",
+            step_name,
+            result.status,
+            elapsed,
+            out_path.name,
+        )
+
+    # Run the target workflow and print full output
+    logger.info("--- Target: %s ---", target)
+    workflow = _instantiate_workflow(target, clients)
     t0 = time.perf_counter()
     try:
         result = workflow.execute(thesis, context)
@@ -443,9 +498,8 @@ def main() -> None:
         sys.exit(1)
     elapsed = time.perf_counter() - t0
 
-    # Print to terminal (series data truncated) and save full result to file
     _print_result(result, elapsed)
-    out_path = _save_result(result, args.workflow, thesis, elapsed)
+    out_path = _save_result(result, target, thesis, elapsed)
     print(f"\n  Saved to: {out_path}\n")
 
 

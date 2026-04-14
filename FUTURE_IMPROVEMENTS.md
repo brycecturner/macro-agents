@@ -30,3 +30,26 @@ candidate pool size) without code deploys, and would follow the same pattern as
 
 Affected files: `app/workflows/web_research.py` (and likely other workflow files
 as they accumulate similar constants).
+
+---
+
+## Workflow Chain Registry (flagged during Ticket 013 / run_workflow.py work)
+
+**Move the pipeline execution order from a hardcoded list in `scripts/run_workflow.py` into a database-backed registry.**
+
+Currently, `PIPELINE` in `scripts/run_workflow.py` is a static list of `(class_name, module_path)` tuples that defines both workflow discovery and execution order. The PRD mentions a `workflow_registry` table (Section 4.6) but it is not yet implemented.
+
+**Proposed improvement:** Implement `workflow_registry` as a proper database table with:
+- `id` — UUID v4 PK, generated in the application layer (consistent with all other tables)
+- `name` — workflow class name (unique, used as identifier)
+- `module_path` — importable Python path for dynamic loading
+- `pipeline_position` — integer defining execution order within the sequential chain
+- `description` — human-readable description surfaced in the UI
+- `is_deep_dive` — boolean distinguishing core research workflows from user-initiated deep dives
+- `is_enabled` — allows disabling a workflow without a code deploy
+
+The `WorkflowRunner` and `run_workflow.py` both read from this table at startup instead of hardcoding the list. Adding a new workflow requires a migration and a seed row — not a code change in the runner.
+
+**Why deferred:** The static list is sufficient while the pipeline is being built out. The registry becomes meaningful once the full 7-workflow chain is implemented and the UI needs to enumerate available workflows.
+
+**Revisit when:** All core research workflows are implemented (after `RecommendationWorkflow`), or when the UI needs to display or trigger individual workflows dynamically.
