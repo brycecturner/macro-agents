@@ -207,6 +207,7 @@ PIPELINE: list[tuple[str, str]] = [
     ("HistoricalAnalogWorkflow", "app.workflows.historical_analog"),
     ("InstrumentAnalysisWorkflow", "app.workflows.instrument_analysis"),
     ("WebResearchWorkflow", "app.workflows.web_research"),
+    ("BacktestWorkflow", "app.workflows.backtest"),
 ]
 
 _PIPELINE_NAMES = [name for name, _ in PIPELINE]
