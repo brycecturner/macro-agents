@@ -49,10 +49,21 @@ def _make_text_block(text: str = "Some response text.") -> MagicMock:
     return block
 
 
-def _make_response(content_blocks: list[MagicMock]) -> MagicMock:
+def _make_response(
+    content_blocks: list[MagicMock], stop_reason: str = "end_turn"
+) -> MagicMock:
     response = MagicMock()
     response.content = content_blocks
+    response.stop_reason = stop_reason
     return response
+
+
+def _make_tool_use_block(tool_use_id: str = "tu_123") -> MagicMock:
+    """Build a mock tool_use content block (signals another search turn)."""
+    block = MagicMock()
+    block.type = "tool_use"
+    block.id = tool_use_id
+    return block
 
 
 # ---------------------------------------------------------------------------
@@ -388,3 +399,138 @@ class TestRankResults:
         ]
         ranked = _rank_results(results)
         assert [r.url for r in ranked] == ["https://news1.com", "https://news2.com"]
+
+
+# ---------------------------------------------------------------------------
+# tool_use continuation loop
+# ---------------------------------------------------------------------------
+
+
+class TestToolUseContinuationLoop:
+    def test_single_turn_end_turn_returns_results(self, client, mock_anthropic):
+        """Normal path: stop_reason=end_turn on first call."""
+        items = [_make_result_item("https://fed.gov/page", "Fed")]
+        mock_anthropic.messages.create.return_value = _make_response(
+            [_make_search_block(items)], stop_reason="end_turn"
+        )
+
+        results = client.search("test")
+
+        assert len(results) == 1
+        assert mock_anthropic.messages.create.call_count == 1
+
+    def test_loops_when_stop_reason_is_tool_use(self, client, mock_anthropic):
+        """Second API call is made when first response has stop_reason=tool_use."""
+        turn1 = _make_response(
+            [
+                _make_search_block([_make_result_item("https://a.com", "A")]),
+                _make_tool_use_block("tu_1"),
+            ],
+            stop_reason="tool_use",
+        )
+        turn2 = _make_response(
+            [_make_search_block([_make_result_item("https://b.com", "B")])],
+            stop_reason="end_turn",
+        )
+        mock_anthropic.messages.create.side_effect = [turn1, turn2]
+
+        results = client.search("test")
+
+        assert mock_anthropic.messages.create.call_count == 2
+        assert len(results) == 2
+
+    def test_results_accumulated_across_turns(self, client, mock_anthropic):
+        """Results from all turns are combined and returned together."""
+        turn1 = _make_response(
+            [
+                _make_search_block([_make_result_item("https://imf.org/a", "IMF")]),
+                _make_tool_use_block("tu_1"),
+            ],
+            stop_reason="tool_use",
+        )
+        turn2 = _make_response(
+            [_make_search_block([_make_result_item("https://news.com/b", "News")])],
+            stop_reason="end_turn",
+        )
+        mock_anthropic.messages.create.side_effect = [turn1, turn2]
+
+        results = client.search("test")
+
+        urls = {r.url for r in results}
+        assert "https://imf.org/a" in urls
+        assert "https://news.com/b" in urls
+
+    def test_continuation_message_contains_tool_result_block(
+        self, client, mock_anthropic
+    ):
+        """Second call includes an assistant turn and a tool_result user turn."""
+        turn1_content = [
+            _make_search_block([_make_result_item("https://a.com", "A")]),
+            _make_tool_use_block("tu_abc"),
+        ]
+        turn1 = _make_response(turn1_content, stop_reason="tool_use")
+        turn2 = _make_response([], stop_reason="end_turn")
+        mock_anthropic.messages.create.side_effect = [turn1, turn2]
+
+        client.search("test query")
+
+        second_call = mock_anthropic.messages.create.call_args_list[1]
+        messages = second_call.kwargs.get("messages") or second_call.args[0]
+
+        # messages[0] = original user query
+        # messages[1] = assistant turn with turn1 content
+        # messages[2] = user turn with tool_result block
+        assert len(messages) == 3
+        assert messages[1]["role"] == "assistant"
+        assert messages[1]["content"] is turn1_content
+
+        user_turn = messages[2]
+        assert user_turn["role"] == "user"
+        tool_result = user_turn["content"][0]
+        assert tool_result["type"] == "tool_result"
+        assert tool_result["tool_use_id"] == "tu_abc"
+
+    def test_stops_when_no_tool_use_blocks_in_non_end_turn_response(
+        self, client, mock_anthropic
+    ):
+        """Stops after one call: non-end_turn stop_reason with no tool_use blocks."""
+        # Response has stop_reason="max_tokens" (not end_turn, not tool_use) with
+        # no tool_use blocks — should still stop after one call.
+        response = _make_response(
+            [_make_search_block([_make_result_item("https://example.com", "E")])],
+            stop_reason="max_tokens",
+        )
+        mock_anthropic.messages.create.return_value = response
+
+        results = client.search("test")
+
+        assert mock_anthropic.messages.create.call_count == 1
+        assert len(results) == 1
+
+    def test_api_error_on_second_turn_raises_web_search_client_error(
+        self, client, mock_anthropic
+    ):
+        """WebSearchClientError is raised if the API fails on a continuation turn."""
+        turn1 = _make_response([_make_tool_use_block("tu_1")], stop_reason="tool_use")
+        mock_anthropic.messages.create.side_effect = [turn1, RuntimeError("timeout")]
+
+        with pytest.raises(WebSearchClientError, match="Web search failed"):
+            client.search("test")
+
+    def test_multiple_tool_use_blocks_all_acknowledged(self, client, mock_anthropic):
+        """Every tool_use block in a response gets a tool_result in the continuation."""
+        turn1_content = [
+            _make_tool_use_block("tu_1"),
+            _make_tool_use_block("tu_2"),
+        ]
+        turn1 = _make_response(turn1_content, stop_reason="tool_use")
+        turn2 = _make_response([], stop_reason="end_turn")
+        mock_anthropic.messages.create.side_effect = [turn1, turn2]
+
+        client.search("test")
+
+        second_call = mock_anthropic.messages.create.call_args_list[1]
+        messages = second_call.kwargs.get("messages") or second_call.args[0]
+        tool_result_turn = messages[2]
+        tool_result_ids = {b["tool_use_id"] for b in tool_result_turn["content"]}
+        assert tool_result_ids == {"tu_1", "tu_2"}

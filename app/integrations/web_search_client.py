@@ -136,36 +136,77 @@ class WebSearchClient:
     def search(self, query: str) -> list[SearchResult]:
         """Execute a web search and return quality-ranked results.
 
+        Implements the tool_use continuation loop required by the Anthropic
+        Messages API.  When ``stop_reason == "tool_use"`` the model wants to
+        invoke the search tool again; the assistant turn is appended to the
+        conversation along with a ``tool_result`` acknowledgement for each
+        ``tool_use`` block, and the API is called again.  The loop exits when
+        ``stop_reason == "end_turn"``.
+
+        For the built-in ``web_search_20250305`` server-side tool, Anthropic
+        executes the search and embeds the results in the assistant response as
+        ``web_search_tool_result`` blocks before the response reaches the
+        client.  The ``tool_result`` sent back in the continuation turn is an
+        empty acknowledgement — it signals that the client has received the
+        tool output so the model can proceed.
+
         Args:
             query: The search query string.
 
         Returns:
             List of :class:`SearchResult` objects, with primary sources
-            ranked before aggregators.  The list may be empty if no results
-            are found.
+            ranked before aggregators.  Results from all continuation turns
+            are combined.  The list may be empty if no results are found.
 
         Raises:
             WebSearchClientError: If the Anthropic API call fails for any
                 reason.
         """
         retrieved_at = datetime.now(tz=UTC)
+        messages: list[dict] = [{"role": "user", "content": query}]
+        all_results: list[SearchResult] = []
 
-        try:
-            response = self._client.messages.create(
-                model=self._model,
-                max_tokens=1024,
-                tools=[{"type": "web_search_20250305", "name": "web_search"}],
-                messages=[{"role": "user", "content": query}],
-            )
-        except Exception as exc:
-            raise WebSearchClientError(
-                f"Web search failed for query '{query}': "
-                f"{type(exc).__name__}: {exc}"
-            ) from exc
+        while True:
+            try:
+                response = self._client.messages.create(
+                    model=self._model,
+                    max_tokens=1024,
+                    tools=[{"type": "web_search_20250305", "name": "web_search"}],
+                    messages=messages,
+                )
+            except Exception as exc:
+                raise WebSearchClientError(
+                    f"Web search failed for query '{query}': "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
 
-        results = _extract_results(response.content, retrieved_at)
-        ranked = _rank_results(results)
+            all_results.extend(_extract_results(response.content, retrieved_at))
 
+            if response.stop_reason == "end_turn":
+                break
+
+            # Build continuation: append the assistant turn, then a user turn
+            # containing empty tool_result acknowledgements for every tool_use
+            # block in the response.
+            messages.append({"role": "assistant", "content": response.content})
+            tool_results = [
+                {"type": "tool_result", "tool_use_id": block.id, "content": ""}
+                for block in response.content
+                if getattr(block, "type", None) == "tool_use"
+            ]
+            if not tool_results:
+                # stop_reason was not "end_turn" but no tool_use blocks are
+                # present — cannot build a valid continuation; stop here.
+                logger.warning(
+                    "WebSearchClient: stop_reason=%r but no tool_use blocks "
+                    "found in response for query %r — stopping.",
+                    response.stop_reason,
+                    query,
+                )
+                break
+            messages.append({"role": "user", "content": tool_results})
+
+        ranked = _rank_results(all_results)
         logger.debug(
             "Web search completed: query=%r results=%d primary=%d",
             query,
