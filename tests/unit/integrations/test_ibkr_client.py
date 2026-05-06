@@ -6,7 +6,7 @@ and real accounts is governed exclusively by pod_settings.trading_mode.
 """
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -17,7 +17,6 @@ from app.integrations.ibkr_client import (
     IBKRAccountSummary,
     IBKRClient,
     IBKRClientError,
-    IBKRNewsItem,
     IBKROrder,
     IBKROrderResult,
     IBKRPosition,
@@ -82,23 +81,6 @@ _CONID_SEARCH_PAYLOAD = [
 _ORDER_RESULT_PAYLOAD = [
     {"order_id": "999001", "order_status": "PreSubmitted"},
 ]
-
-_NEWS_PAYLOAD = {
-    "news": [
-        {
-            "id": "art-001",
-            "headline": "Fed signals rate pause",
-            "url": "https://example.com/article1",
-            "date": int((datetime.now(UTC) + timedelta(hours=1)).timestamp() * 1000),
-        },
-        {
-            "id": "art-002",
-            "headline": "Old news item",
-            "url": "https://example.com/article2",
-            "date": int((datetime.now(UTC) - timedelta(days=5)).timestamp() * 1000),
-        },
-    ]
-}
 
 
 # ---------------------------------------------------------------------------
@@ -213,9 +195,10 @@ class TestIBKRClientTradingModeRouting:
             side="BUY",
             quantity=100,
         )
-        # Two requests: conid lookup + order submission
+        # Three requests: iserver session init + conid lookup + order submission
         mock_request = MagicMock(
             side_effect=[
+                _ok_response({"accounts": [PAPER_ACCOUNT]}),
                 _ok_response(_CONID_SEARCH_PAYLOAD),
                 _ok_response(_ORDER_RESULT_PAYLOAD),
             ]
@@ -223,7 +206,7 @@ class TestIBKRClientTradingModeRouting:
         with patch.object(paper_client._http, "request", mock_request):
             paper_client.submit_order(order)
 
-        order_url = mock_request.call_args_list[1].args[1]
+        order_url = mock_request.call_args_list[2].args[1]
         assert PAPER_ACCOUNT in order_url
         assert REAL_ACCOUNT not in order_url
 
@@ -236,6 +219,7 @@ class TestIBKRClientTradingModeRouting:
         )
         mock_request = MagicMock(
             side_effect=[
+                _ok_response({"accounts": [REAL_ACCOUNT]}),
                 _ok_response(_CONID_SEARCH_PAYLOAD),
                 _ok_response(_ORDER_RESULT_PAYLOAD),
             ]
@@ -243,7 +227,7 @@ class TestIBKRClientTradingModeRouting:
         with patch.object(real_client._http, "request", mock_request):
             real_client.submit_order(order)
 
-        order_url = mock_request.call_args_list[1].args[1]
+        order_url = mock_request.call_args_list[2].args[1]
         assert REAL_ACCOUNT in order_url
         assert PAPER_ACCOUNT not in order_url
 
@@ -487,6 +471,7 @@ class TestIBKRClientGetPriceHistory:
         )
         mock_request = MagicMock(
             side_effect=[
+                _ok_response({"accounts": [PAPER_ACCOUNT]}),
                 _ok_response(_CONID_SEARCH_PAYLOAD),
                 _ok_response(_PRICE_HISTORY_PAYLOAD),
             ]
@@ -494,7 +479,8 @@ class TestIBKRClientGetPriceHistory:
         with patch.object(client._http, "request", mock_request):
             client.get_price_history("TLT", "1y", "1d")
 
-        assert mock_request.call_count == 2
+        # iserver session init + conid lookup + history = 3 requests
+        assert mock_request.call_count == 3
 
     def test_conid_cached_after_first_lookup(self):
         client = IBKRClient(
@@ -505,6 +491,7 @@ class TestIBKRClientGetPriceHistory:
         )
         mock_request = MagicMock(
             side_effect=[
+                _ok_response({"accounts": [PAPER_ACCOUNT]}),
                 _ok_response(_CONID_SEARCH_PAYLOAD),
                 _ok_response(_PRICE_HISTORY_PAYLOAD),
                 _ok_response(_PRICE_HISTORY_PAYLOAD),
@@ -514,9 +501,9 @@ class TestIBKRClientGetPriceHistory:
             client.get_price_history("TLT", "1y", "1d")
             client.get_price_history("TLT", "5y", "1w")
 
-        # First call: conid lookup + history = 2 requests
-        # Second call: conid cached, only history = 1 request
-        assert mock_request.call_count == 3
+        # First call: session init + conid lookup + history = 3 requests
+        # Second call: session and conid both cached, only history = 1 request
+        assert mock_request.call_count == 4
 
     def test_missing_data_key_raises_error(self):
         client = self._make_client_with_cached_conid()
@@ -707,97 +694,6 @@ class TestIBKRClientCancelOrder:
         with patch.object(paper_client._http, "request", mock_request):
             with pytest.raises(IBKRClientError, match="HTTP 404"):
                 paper_client.cancel_order("999001")
-
-
-# ---------------------------------------------------------------------------
-# TestIBKRClientGetNews
-# ---------------------------------------------------------------------------
-
-
-class TestIBKRClientGetNews:
-    def test_returns_list_of_news_items(self, paper_client):
-        since = datetime.now(UTC) - timedelta(hours=2)
-        mock_request = MagicMock(return_value=_ok_response(_NEWS_PAYLOAD))
-        with patch.object(paper_client._http, "request", mock_request):
-            result = paper_client.get_news(since)
-
-        assert isinstance(result, list)
-        assert all(isinstance(item, IBKRNewsItem) for item in result)
-
-    def test_items_older_than_since_are_excluded(self, paper_client):
-        since = datetime.now(UTC) - timedelta(hours=2)
-        mock_request = MagicMock(return_value=_ok_response(_NEWS_PAYLOAD))
-        with patch.object(paper_client._http, "request", mock_request):
-            result = paper_client.get_news(since)
-
-        # _NEWS_PAYLOAD has one future item and one 5-days-old item; only future passes
-        assert len(result) == 1
-        assert result[0].article_id == "art-001"
-
-    def test_all_recent_items_included_when_since_is_old(self, paper_client):
-        since = datetime.now(UTC) - timedelta(days=30)
-        mock_request = MagicMock(return_value=_ok_response(_NEWS_PAYLOAD))
-        with patch.object(paper_client._http, "request", mock_request):
-            result = paper_client.get_news(since)
-
-        assert len(result) == 2
-
-    def test_news_item_fields_populated(self, paper_client):
-        since = datetime.now(UTC) - timedelta(hours=2)
-        mock_request = MagicMock(return_value=_ok_response(_NEWS_PAYLOAD))
-        with patch.object(paper_client._http, "request", mock_request):
-            result = paper_client.get_news(since)
-
-        item = result[0]
-        assert item.article_id == "art-001"
-        assert item.headline == "Fed signals rate pause"
-        assert item.url == "https://example.com/article1"
-        assert item.published_at.tzinfo == UTC
-
-    def test_retrieved_at_is_utc(self, paper_client):
-        since = datetime.now(UTC) - timedelta(hours=2)
-        before = datetime.now(UTC)
-        mock_request = MagicMock(return_value=_ok_response(_NEWS_PAYLOAD))
-        with patch.object(paper_client._http, "request", mock_request):
-            result = paper_client.get_news(since)
-        after = datetime.now(UTC)
-
-        assert before <= result[0].retrieved_at <= after
-
-    def test_accepts_list_response_format(self, paper_client):
-        """Some IBKR API versions return a list directly rather than a wrapped dict."""
-        since = datetime.now(UTC) - timedelta(hours=2)
-        list_payload = _NEWS_PAYLOAD["news"]
-        mock_request = MagicMock(return_value=_ok_response(list_payload))
-        with patch.object(paper_client._http, "request", mock_request):
-            result = paper_client.get_news(since)
-
-        assert len(result) == 1
-
-    def test_empty_news_returns_empty_list(self, paper_client):
-        since = datetime.now(UTC) - timedelta(hours=2)
-        mock_request = MagicMock(return_value=_ok_response({"news": []}))
-        with patch.object(paper_client._http, "request", mock_request):
-            result = paper_client.get_news(since)
-
-        assert result == []
-
-    def test_malformed_news_item_skipped_not_raised(self, paper_client):
-        """Malformed individual items are skipped; the call succeeds."""
-        since = datetime.now(UTC) - timedelta(hours=2)
-        future_ms = int((datetime.now(UTC) + timedelta(hours=1)).timestamp() * 1000)
-        payload = {
-            "news": [
-                {"id": "good", "headline": "OK", "date": future_ms},
-                {"no_date_field": True},  # malformed — missing parseable timestamp
-            ]
-        }
-        mock_request = MagicMock(return_value=_ok_response(payload))
-        with patch.object(paper_client._http, "request", mock_request):
-            result = paper_client.get_news(since)
-
-        assert len(result) == 1
-        assert result[0].article_id == "good"
 
 
 # ---------------------------------------------------------------------------

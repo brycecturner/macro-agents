@@ -270,7 +270,7 @@ positions                — UUID PK; real/paper positions, belongs to a pod
 trades                   — UUID PK; execution log
 portfolio_snapshots      — UUID PK; daily portfolio state
 economic_calendar        — UUID PK; scheduled macro release dates from FRED
-news_events              — UUID PK; detected unscheduled events from IBKR news feed
+news_events              — UUID PK; detected unscheduled events from web search + LLM classifier
 alerts                   — UUID PK; alert log with delivery status
 llm_usage_log            — UUID PK; token usage and cost per Anthropic API call (append-only)
 audit_log                — UUID PK; append-only state change log
@@ -317,7 +317,7 @@ The system maintains an `economic_calendar` table populated from the FRED releas
 Supported scheduled trigger types: `CPI_RELEASE`, `FOMC_DECISION`, `NFP_RELEASE`, `PMI_RELEASE`, `GDP_RELEASE`, `PCE_RELEASE`.
 
 **Unscheduled events** (tariff announcements, geopolitical developments, surprise Fed statements):
-The daily job polls the IBKR news API for headlines since the last run. A lightweight LLM classifier reads the headlines and determines whether any match the unscheduled trigger types on active conditions. If the classifier fires, the event is logged to `news_events` and the relevant conditions evaluate.
+The daily job runs targeted web searches via `WebSearchClient` for each supported unscheduled trigger type. A lightweight LLM classifier reads the results and determines whether any match the unscheduled trigger types on active conditions. If the classifier fires, the event is logged to `news_events` and the relevant conditions evaluate.
 
 The classification result (headline, classifier confidence, matched trigger type) is stored in `news_events` and cited in the `condition_evaluations` log. Users can review and override misclassifications.
 
@@ -399,7 +399,7 @@ The execution engine must support:
 - Retrieving real-time and historical positions
 - Fetching account balance and buying power
 - Paper trading mode (IBKR paper account) and real trading mode (IBKR real account), switchable per-pod
-- Polling IBKR news API for unscheduled event detection (see Section 5.3)
+- Unscheduled event detection via web search + LLM classifier (see Section 5.3)
 
 ### 6.2 Portfolio & Position Management
 
@@ -552,7 +552,7 @@ The system tracks performance at both the pod level and the individual thesis le
 
 | Source | Purpose | Cost |
 |--------|---------|------|
-| IBKR Client Portal API | Market data, price history, order execution, news feed | Included with account |
+| IBKR Client Portal API | Market data, price history, order execution | Included with account |
 | FRED API | US macro time series: yield curves, CPI, PMI, unemployment, Fed funds futures | Free |
 | OECD API | Developed market macro series: ECB rates, Eurozone CPI, non-US yield curves, OECD PMI | Free |
 | FRED release calendar | Scheduled economic event dates for event-type condition triggers | Free |
@@ -706,7 +706,7 @@ These are **hard requirements**, not suggestions.
 - Discrete falsification conditions with daily monitoring
 - State and event-triggered condition types
 - Scheduled event detection via FRED calendar
-- Unscheduled event detection via IBKR news + LLM classifier
+- Unscheduled event detection via web search + LLM classifier
 - Alert-only and auto-close kill authority modes
 - Email alert delivery with pluggable interface for future channels
 - Weekly rebalancing with 1% NAV threshold and manual override
@@ -742,7 +742,7 @@ These are **hard requirements**, not suggestions.
 | Rebalancing threshold | 1% of NAV per position |
 | Deep dive workflow library | Sensitivity analysis, regime stress test, portfolio correlation, historical analog detail. Claude Code to scaffold; PM to expand over time. |
 | Frontend framework | FastAPI + Jinja2 + HTMX (server-rendered, no React) |
-| Unscheduled event data source | IBKR news API + LLM classifier |
+| Unscheduled event data source | Web search (WebSearchClient) + LLM classifier |
 | Agent architecture | Single agent, sequential workflow execution. WorkflowResult interface designed for multi-agent migration in v2. |
 | Further Reading | 3-5 sources per brief; cited sources ranked first, then additional relevant sources; one-sentence annotation per entry; all source types included. |
 | Model selection | Per-workflow. Opus for FalsificationGeneration, Recommendation, and Intake. Sonnet for all other workflows. |

@@ -33,6 +33,26 @@ as they accumulate similar constants).
 
 ---
 
+## Third-Party News API for Unscheduled Event Detection (deferred during Ticket 028)
+
+The daily monitoring job detects unscheduled macro events (tariff announcements, surprise Fed statements, geopolitical developments) via targeted web searches through `WebSearchClient`. This is pull-based and keyword-driven — it will miss events that don't match query terms and runs on a schedule rather than in real time.
+
+The IBKR Client Portal news endpoint was evaluated and ruled out: it requires a `conid` and is instrument-specific; it cannot serve as a general macro headline feed.
+
+**Alternatives to evaluate when revisiting:**
+
+| Provider | Free tier | Notes |
+|---|---|---|
+| Alpaca News API | Yes (limited) | Financial headlines with ticker tags; REST API; finance-focused |
+| Polygon.io | Yes (limited) | Market news feed; good ETF and macro coverage |
+| NewsAPI.org | Yes (100 req/day) | General news aggregator; broad event coverage |
+
+**Recommendation:** Alpaca or Polygon are the natural first choices — finance-focused and free tiers are adequate for v1 volume. A push-based webhook or WebSocket feed would be preferable to polling if event detection latency becomes a concern.
+
+**Revisit if:** The web search approach misses events that move positions, or if near-real-time event detection becomes a requirement.
+
+---
+
 ## Workflow Chain Registry (flagged during Ticket 013 / run_workflow.py work)
 
 **Move the pipeline execution order from a hardcoded list in `scripts/run_workflow.py` into a database-backed registry.**

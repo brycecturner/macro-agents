@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     ibkr_base_url: str | None = None
     ibkr_account_id: str | None = None
     ibkr_paper_account_id: str | None = None
+    # ibeam credentials — consumed by the ibeam Docker service, not the app
+    ibkr_username: str | None = None
+    ibkr_password: str | None = None
 
     # Email / SMTP — required for alert delivery
     smtp_host: str | None = None

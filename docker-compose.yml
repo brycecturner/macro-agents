@@ -1,16 +1,37 @@
 services:
+  ibeam:
+    image: voyz/ibeam:latest
+    environment:
+      IBEAM_ACCOUNT: ${IBKR_USERNAME}
+      IBEAM_PASSWORD: ${IBKR_PASSWORD}
+    ports:
+      - "5000:5000"
+      # app shares ibeam's network namespace, so its port is published here
+      - "8000:8000"
+    healthcheck:
+      # /tickle returns 200 once the session is authenticated
+      test: ["CMD", "curl", "-sf", "-k", "https://localhost:5000/v1/api/tickle"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
   app:
     build: .
-    ports:
-      - "8000:8000"
+    # Share ibeam's network namespace so IBKR gateway sees requests as localhost
+    network_mode: "service:ibeam"
     env_file:
       - .env
     environment:
       # Override DATABASE_URL so the app uses the internal docker hostname "db"
       # rather than the localhost value in .env
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # Gateway is localhost from within ibeam's network namespace
+      IBKR_BASE_URL: https://localhost:5000
     depends_on:
       db:
+        condition: service_healthy
+      ibeam:
         condition: service_healthy
     volumes:
       - .:/app

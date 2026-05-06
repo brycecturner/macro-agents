@@ -81,8 +81,7 @@ TICKET 005b — OECD API Client [DONE]
 TICKET 006 — IBKR Client Portal API Client [DONE]
 - IBKRClient class wraps the IBKR Client Portal REST API
 - Methods: get_positions(), get_account_summary(), get_price_history(symbol,
-  period, bar_size), submit_order(order), cancel_order(order_id),
-  get_news(since_timestamp)
+  period, bar_size), submit_order(order), cancel_order(order_id)
 - Client reads trading_mode from pod settings and routes to paper or real
   account accordingly
 - All requests include authentication headers; session management handled
@@ -140,7 +139,7 @@ TICKET 010 — MacroContextWorkflow [DONE]
 - Agent inferences explicitly flagged in agent_inferences field
 - Tests confirm correct FRED series selection and citation format
 
-TICKET 011 — HistoricalAnalogWorkflow
+TICKET 011 — HistoricalAnalogWorkflow 
 - Implements BaseWorkflow
 - Identifies 2-4 historical periods with macro configurations similar to
   the current backdrop using FRED data
@@ -344,17 +343,19 @@ TICKET 027 — Event Condition Evaluator
 - Tests confirm both scheduled and unscheduled trigger detection, and
   correct no_trigger logging
 
-TICKET 028 — IBKR News Poller & LLM Event Classifier
-- Scheduled job polls IBKR news API for headlines since last run
-- LLM classifier reads headlines and assigns zero or one unscheduled
-  trigger_type per headline: TARIFF_ANNOUNCEMENT, FED_SPEECH,
+TICKET 028 — News Poller & LLM Event Classifier
+- Scheduled job runs targeted web searches via WebSearchClient for each
+  supported unscheduled trigger type (e.g. "tariff announcement today",
+  "surprise Fed statement today", "geopolitical event markets today")
+- LLM classifier reads search results and assigns zero or one unscheduled
+  trigger_type per result: TARIFF_ANNOUNCEMENT, FED_SPEECH,
   GEOPOLITICAL_EVENT, SURPRISE_RATE_MOVE
-- Headlines that match no trigger type are discarded
+- Results that match no trigger type are discarded
 - Matched events stored in news_events with: headline, url, detected_at,
   trigger_type, classifier_confidence
 - User can view and override misclassifications from the web UI
-- Tests confirm classifier output structure and storage; mock LLM for unit
-  tests
+- Tests confirm classifier output structure and storage; mock LLM and
+  WebSearchClient for unit tests
 
 TICKET 029 — Daily Monitoring Job
 - APScheduler job runs at market close (4:30pm ET) on trading days

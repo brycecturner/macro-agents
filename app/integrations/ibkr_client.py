@@ -103,20 +103,6 @@ class IBKROrderResult:
     submitted_at: datetime
 
 
-@dataclass
-class IBKRNewsItem:
-    """A single news headline from IBKR.
-
-    Citation format: ``IBKR:news {article_id}, {retrieved_at}``
-    """
-
-    article_id: str
-    headline: str
-    url: str | None
-    published_at: datetime
-    retrieved_at: datetime
-
-
 class IBKRClient:
     """Wraps the IBKR Client Portal REST API.
 
@@ -156,6 +142,7 @@ class IBKRClient:
         # verify=False: IBKR Client Portal gateway uses a self-signed certificate
         self._http = httpx.Client(timeout=timeout, verify=False)
         self._conid_cache: dict[str, int] = {}
+        self._iserver_initialised = False
 
     @property
     def _active_account_id(self) -> str:
@@ -193,6 +180,19 @@ class IBKRClient:
             ) from exc
         return response.json()
 
+    def _ensure_iserver_session(self) -> None:
+        """Initialise the iserver session if not already done.
+
+        The Client Portal gateway requires a call to /iserver/accounts before
+        any other /iserver/ endpoint will respond. Without it every iserver
+        request returns 404. Called lazily on the first iserver operation.
+        """
+        if self._iserver_initialised:
+            return
+        self._request("GET", "/v1/api/iserver/accounts")
+        self._iserver_initialised = True
+        logger.debug("iserver session initialised")
+
     def _get_conid(self, symbol: str) -> int:
         """Resolve the IBKR contract ID (conid) for a ticker symbol.
 
@@ -202,6 +202,7 @@ class IBKRClient:
         Raises:
             IBKRClientError: If no contract is found for the symbol.
         """
+        self._ensure_iserver_session()
         if symbol in self._conid_cache:
             return self._conid_cache[symbol]
 
@@ -480,66 +481,6 @@ class IBKRClient:
             f"/v1/api/iserver/account/{account_id}/order/{order_id}",
         )
         logger.debug("Order cancelled: order_id=%s (account=%s)", order_id, account_id)
-
-    def get_news(self, since_timestamp: datetime) -> list[IBKRNewsItem]:
-        """Fetch news headlines from IBKR published after a given timestamp.
-
-        Args:
-            since_timestamp: Return only items published after this UTC datetime.
-
-        Returns:
-            List of :class:`IBKRNewsItem` objects, filtered to items newer than
-            ``since_timestamp``.
-
-        Raises:
-            IBKRClientError: If the API call fails.
-        """
-        retrieved_at = datetime.now(tz=UTC)
-
-        payload = self._request(
-            "GET",
-            "/v1/api/iserver/news",
-            params={"limit": 100},
-        )
-
-        # Normalise: some IBKR API versions wrap news in a dict, others return a list
-        if isinstance(payload, list):
-            news_list = payload
-        elif isinstance(payload, dict):
-            news_list = payload.get("news", [])
-        else:
-            news_list = []
-
-        since_ms = since_timestamp.timestamp() * 1000  # IBKR timestamps are ms
-        items: list[IBKRNewsItem] = []
-        for item in news_list:
-            try:
-                published_ms = int(item.get("date") or item.get("publishedAt") or 0)
-                if published_ms <= since_ms:
-                    continue
-                published_at = datetime.fromtimestamp(published_ms / 1000, tz=UTC)
-                items.append(
-                    IBKRNewsItem(
-                        article_id=str(item.get("id") or item.get("articleId", "")),
-                        headline=str(item.get("headline") or item.get("title", "")),
-                        url=item.get("url"),
-                        published_at=published_at,
-                        retrieved_at=retrieved_at,
-                    )
-                )
-            except (KeyError, ValueError, TypeError) as exc:
-                logger.warning(
-                    "Skipping malformed news item: %s: %s",
-                    type(exc).__name__,
-                    exc,
-                )
-
-        logger.debug(
-            "Fetched %d news items since %s",
-            len(items),
-            since_timestamp.isoformat(),
-        )
-        return items
 
     def close(self) -> None:
         """Close the underlying HTTP client."""
