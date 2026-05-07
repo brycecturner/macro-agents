@@ -208,6 +208,7 @@ PIPELINE: list[tuple[str, str]] = [
     ("InstrumentAnalysisWorkflow", "app.workflows.instrument_analysis"),
     ("WebResearchWorkflow", "app.workflows.web_research"),
     ("BacktestWorkflow", "app.workflows.backtest"),
+    ("FalsificationGenerationWorkflow", "app.workflows.falsification_generation"),
 ]
 
 _PIPELINE_NAMES = [name for name, _ in PIPELINE]
@@ -475,8 +476,8 @@ def main() -> None:
         try:
             result = workflow.execute(thesis, context)
         except Exception as exc:
-            logger.exception("Predecessor %s raised an exception: %s", step_name, exc)
-            sys.exit(1)
+            logger.warning("Predecessor %s failed (skipping): %s", step_name, exc)
+            continue
         elapsed = time.perf_counter() - t0
         context.prior_results.append(result)
         out_path = _save_result(result, step_name, thesis, elapsed)
