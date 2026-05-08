@@ -1,18 +1,4 @@
-"""FalsificationGenerationWorkflow — translate thesis beliefs into kill conditions.
-
-This workflow uses Claude Opus to translate qualitative thesis beliefs into
-3-5 discrete, programmatically testable kill conditions. These conditions
-are persisted to the falsification_conditions table and will later be
-evaluated daily by the monitoring job.
-
-This is step 6 of 7 in the sequential research pipeline.
-
-Dependencies (consumed from WorkflowContext.prior_results):
-  - MacroContextWorkflow — current macro data points for grounding thresholds
-  - BacktestWorkflow — performance stats (drawdown, vol) for risk-based conditions
-  - InstrumentAnalysisWorkflow — instrument details and price levels
-  - WebResearchWorkflow — recent events context for event-type triggers
-"""
+"""Step 6/7: translate qualitative thesis beliefs into kill conditions."""
 
 from __future__ import annotations
 
@@ -23,7 +9,7 @@ from datetime import date
 
 from app.integrations.anthropic_client import AnthropicClient
 from app.models.enums import ConditionType
-from app.models.thesis import FalsificationCondition
+from app.models.thesis import FalsificationCondition, Thesis
 from app.workflows.base import (
     BaseWorkflow,
     Citation,
@@ -36,27 +22,15 @@ from app.workflows.base import (
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# JSON parsing helper
-# ---------------------------------------------------------------------------
-
-
 def _strip_markdown_fences(text: str) -> str:
-    """Strip ```json ... ``` fences if present, returning the inner content."""
     stripped = text.strip()
     if stripped.startswith("```"):
-        # Remove opening fence (```json or ```)
         first_newline = stripped.index("\n")
         stripped = stripped[first_newline + 1 :]
-        # Remove closing fence
         if stripped.endswith("```"):
             stripped = stripped[:-3].rstrip()
     return stripped
 
-
-# ---------------------------------------------------------------------------
-# Allowed trigger types (from PRD Section 5.3)
-# ---------------------------------------------------------------------------
 
 _SCHEDULED_TRIGGER_TYPES = frozenset(
     {
@@ -79,10 +53,6 @@ _UNSCHEDULED_TRIGGER_TYPES = frozenset(
 )
 
 _ALL_TRIGGER_TYPES = _SCHEDULED_TRIGGER_TYPES | _UNSCHEDULED_TRIGGER_TYPES
-
-# ---------------------------------------------------------------------------
-# Prompt templates
-# ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT = """\
 You are a senior macro research analyst responsible for translating \
@@ -125,19 +95,13 @@ Respond only with the JSON object. No markdown fences, no preamble.\
 """
 
 
-# ---------------------------------------------------------------------------
-# Prompt builder
-# ---------------------------------------------------------------------------
-
-
 def _build_user_message(
-    thesis,
+    thesis: Thesis,
     macro_context: dict | None,
     backtest_data: dict | None,
     instrument_data: dict | None,
     web_research_data: dict | None,
 ) -> str:
-    """Assemble the user message with thesis details and prior workflow data."""
     thesis_direction = (
         thesis.direction.value
         if hasattr(thesis.direction, "value")
@@ -154,7 +118,6 @@ def _build_user_message(
         lines.append(f"Notes: {thesis.notes}")
     lines.append("")
 
-    # Macro context — current data points for grounding thresholds
     if macro_context:
         lines.append("=== CURRENT MACRO CONTEXT ===")
         summary = macro_context.get("summary", "")
@@ -171,7 +134,6 @@ def _build_user_message(
                         lines.append(f"  {series_id}: {latest}")
         lines.append("")
 
-    # Backtest/historical analog data — drawdown and vol levels
     if backtest_data:
         lines.append("=== HISTORICAL ANALOG ANALYSIS ===")
         aggregate = backtest_data.get("aggregate", {})
@@ -188,7 +150,6 @@ def _build_user_message(
             lines.append(f"  Analysis: {analysis}")
         lines.append("")
 
-    # Instrument data — current price levels and statistics
     if instrument_data:
         lines.append("=== INSTRUMENT ANALYSIS ===")
         instruments = instrument_data.get("instruments", {})
@@ -209,7 +170,6 @@ def _build_user_message(
             lines.append(f"  Analysis: {analysis}")
         lines.append("")
 
-    # Web research — recent events context
     if web_research_data:
         lines.append("=== RECENT WEB RESEARCH ===")
         sources = web_research_data.get("sources", [])
@@ -224,23 +184,8 @@ def _build_user_message(
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Workflow
-# ---------------------------------------------------------------------------
-
-
 class FalsificationGenerationWorkflow(BaseWorkflow):
-    """Translate qualitative thesis beliefs into testable kill conditions.
-
-    Uses Claude Opus to generate 3-5 falsification conditions with measurable
-    proxies and evaluation logic. Conditions are persisted to the
-    falsification_conditions table and returned in structured_output.
-
-    Outputs (structured_output):
-        conditions (list[dict]): Generated conditions, each with description,
-            condition_type, trigger_type, measurable_proxy, evaluation_logic.
-        rationale (str): LLM explanation of the falsification strategy.
-    """
+    """Step 6/7: generate 3-5 falsification conditions and persist them."""
 
     name = "FalsificationGenerationWorkflow"
     description = (
@@ -258,8 +203,7 @@ class FalsificationGenerationWorkflow(BaseWorkflow):
     ) -> None:
         self._anthropic = anthropic_client
 
-    def execute(self, thesis, context: WorkflowContext) -> WorkflowResult:
-        # --- Resolve client ---
+    def execute(self, thesis: Thesis, context: WorkflowContext) -> WorkflowResult:
         if self._anthropic is None:
             from app.core.settings import get_settings
 
@@ -274,7 +218,6 @@ class FalsificationGenerationWorkflow(BaseWorkflow):
         agent_inferences: list[str] = []
         citations: list[Citation] = []
 
-        # --- Consume prior workflow results ---
         macro_result = context.get_result("MacroContextWorkflow")
         backtest_result = context.get_result("BacktestWorkflow")
         instrument_result = context.get_result("InstrumentAnalysisWorkflow")
@@ -319,7 +262,6 @@ class FalsificationGenerationWorkflow(BaseWorkflow):
                 "event-type conditions may lack recent context."
             )
 
-        # --- Build prompt and call LLM ---
         user_message = _build_user_message(
             thesis, macro_data, backtest_data, instrument_data, web_data
         )
@@ -335,7 +277,6 @@ class FalsificationGenerationWorkflow(BaseWorkflow):
             system=_SYSTEM_PROMPT,
         )
 
-        # --- Parse LLM response ---
         try:
             content = _strip_markdown_fences(response.content)
             parsed = json.loads(content)
@@ -358,7 +299,6 @@ class FalsificationGenerationWorkflow(BaseWorkflow):
                 raw_output=response.content,
             )
 
-        # --- Validate and persist conditions ---
         conditions_output: list[dict] = []
 
         for condition_data in conditions_raw:
@@ -371,11 +311,9 @@ class FalsificationGenerationWorkflow(BaseWorkflow):
             measurable_proxy = condition_data.get("measurable_proxy", "")
             evaluation_logic = condition_data.get("evaluation_logic", "")
 
-            # Skip conditions missing required fields
             if not description or not condition_type_str or not measurable_proxy:
                 continue
 
-            # Validate condition_type
             try:
                 condition_type = ConditionType(condition_type_str)
             except ValueError:
@@ -385,7 +323,6 @@ class FalsificationGenerationWorkflow(BaseWorkflow):
                 )
                 continue
 
-            # Enforce trigger_type rules
             if condition_type == ConditionType.event:
                 if trigger_type and trigger_type not in _ALL_TRIGGER_TYPES:
                     agent_inferences.append(
@@ -394,10 +331,8 @@ class FalsificationGenerationWorkflow(BaseWorkflow):
                         f"but trigger_type may need manual correction."
                     )
             else:
-                # State conditions must have null trigger_type
                 trigger_type = None
 
-            # Persist to database
             condition = FalsificationCondition(
                 id=uuid.uuid4(),
                 thesis_id=thesis.id,
@@ -424,7 +359,6 @@ class FalsificationGenerationWorkflow(BaseWorkflow):
 
         context.db.flush()
 
-        # Flag if fewer than 3 conditions were generated
         if len(conditions_output) < 3:
             agent_inferences.append(
                 f"[Agent inference] Only {len(conditions_output)} condition(s) "
@@ -432,7 +366,6 @@ class FalsificationGenerationWorkflow(BaseWorkflow):
                 f"context or the thesis may be narrowly scoped."
             )
 
-        # Add agent inference citation for the LLM-generated content
         citations.append(
             Citation(
                 source_type=CitationSourceType.AGENT_INFERENCE,
