@@ -122,6 +122,28 @@ class _StubDB:
 
 
 # ---------------------------------------------------------------------------
+# Stub PodSettings — paper-mode defaults for the debug runner
+# ---------------------------------------------------------------------------
+
+
+def _stub_pod_settings():
+    from app.core.pod_settings import PodSettings
+    from app.models.enums import KillAuthority, TradingMode
+
+    return PodSettings(
+        pod_id=uuid.uuid4(),
+        trading_mode=TradingMode.paper,
+        target_vol_per_position=0.02,
+        max_position_pct=0.10,
+        rebalance_threshold_pct=0.05,
+        rebalance_day=1,
+        intake_timeout_hours=48,
+        kill_authority_default=KillAuthority.alert_only,
+        vol_lookback_days=252,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Stub Thesis — built from TOML file or CLI args
 # ---------------------------------------------------------------------------
 
@@ -209,6 +231,7 @@ PIPELINE: list[tuple[str, str]] = [
     ("WebResearchWorkflow", "app.workflows.web_research"),
     ("BacktestWorkflow", "app.workflows.backtest"),
     ("FalsificationGenerationWorkflow", "app.workflows.falsification_generation"),
+    ("RecommendationWorkflow", "app.workflows.recommendation"),
 ]
 
 _PIPELINE_NAMES = [name for name, _ in PIPELINE]
@@ -256,7 +279,7 @@ def _instantiate_workflow(name: str, clients: dict):
 # Output formatting
 # ---------------------------------------------------------------------------
 
-_DIVIDER = "─" * 72
+_DIVIDER = "-" * 72
 _OUTPUT_DIR = Path(__file__).parent.parent / "output"
 
 # Keys whose values are long data lists — suppressed in terminal, kept in file.
@@ -466,7 +489,7 @@ def main() -> None:
     # Build context once; prior_results accumulates across steps
     from app.workflows.base import WorkflowContext
 
-    context = WorkflowContext(thesis=thesis, db=stub_db)
+    context = WorkflowContext(thesis=thesis, db=stub_db, pod_settings=_stub_pod_settings())
 
     # Run predecessor workflows, accumulating results into context
     for step_name in predecessors:

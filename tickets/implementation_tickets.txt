@@ -149,6 +149,24 @@ TICKET 011 — HistoricalAnalogWorkflow [DONE]
 - Depends on MacroContextWorkflow result in context
 - Tests confirm analog identification and citation requirements
 
+TICKET 011b — BUG: HistoricalAnalogWorkflow always returns invalid JSON
+- Symptom: every run logs "HistoricalAnalogWorkflow: LLM response was not
+  valid JSON"; status still returns completed because the workflow handles
+  the parse error gracefully, but structured_output is empty/degraded
+- Root cause: model hits max_tokens=2048 and truncates mid-JSON before it
+  can close the response object; the prompt + historical FRED data context
+  is large enough (8,500+ input tokens) that the output regularly exceeds
+  2048 tokens
+- Fix: raise max_tokens for the historical_analog call (try 4096); if the
+  response is still truncated, add a JSON repair step or split the output
+  into smaller structured chunks
+- Acceptance criteria:
+    1. Full pipeline run produces valid JSON from HistoricalAnalogWorkflow
+       on the short_war_thesis.toml example with no "invalid JSON" warning
+    2. structured_output contains at least one analog period with all
+       required fields (date_range, macro_conditions, outcome_summary)
+    3. Tests confirm valid JSON output and analog field completeness
+
 TICKET 012 — InstrumentAnalysisWorkflow [DONE]
 - Implements BaseWorkflow
 - Pulls 5-year price history for the thesis instrument(s) from IBKR
@@ -168,6 +186,44 @@ TICKET 013 — WebResearchWorkflow [DONE]
   source_type, and a one-sentence agent-written annotation
 - All web sources cited with full URL and retrieval date
 - Tests confirm search execution, ranking logic, and annotation generation
+
+TICKET 013b — BUG: WebResearchWorkflow annotation step fails with 429 rate limit [DONE]
+- Root cause: 5 web search queries each drive a multi-turn tool_use loop via
+  WebSearchClient, consuming the full 30k input tokens/minute org limit before
+  the annotation call is made; annotation call then fails with 429 immediately
+- Fix: reduce _N_QUERIES_MAX from 5 to 3 in app/workflows/web_research.py;
+  fewer search calls directly reduces token consumption at the source with no
+  latency penalty; 3 queries is sufficient for focused thesis research
+- The stop_reason='max_tokens' WARNING in WebSearchClient (no tool_use blocks)
+  appears on every query and confirms each search call is already saturating
+  its token budget — the solution is fewer calls, not sleeping after them
+- Acceptance criteria:
+    1. Full pipeline (MacroContext → … → Recommendation) completes without
+       a 429 on the annotation step at Tier 1 token limits
+    2. _N_QUERIES_MAX = 3 in web_research.py
+    3. The existing max_tokens WARNING in WebSearchClient is documented as
+       expected behaviour (model synthesises results after final tool_use round)
+    4. Tests updated to reflect 3-query cap
+
+TICKET 013c — BUG: WebResearchWorkflow queries 2 and 3 dropped by Tier 1 rate limit
+- Symptom: first web search query succeeds and consumes the full 30k token
+  budget; queries 2 and 3 fail immediately with 429 and are silently dropped;
+  annotation runs on results from 1 query only
+- The 65s sleep in TICKET-013b protects the annotation call but does not
+  protect between queries — the inter-query 429s still discard 2/3 of the
+  searches
+- Fix options (in preference order):
+    1. Upgrade Anthropic account to Tier 2 (60k tokens/min) — cleanest,
+       no code change; both remaining 429s would clear
+    2. Add a per-query sleep (~65s) between searches so each query gets a
+       fresh rate-limit window — works at Tier 1 but adds ~2 min to the run
+    3. Reduce the search result payload size by setting allowed_domains on
+       the web_search tool to primary sources only, reducing tokens per query
+- Acceptance criteria:
+    1. All 3 queries execute successfully on a full pipeline run
+    2. WebResearch structured_output.sources reflects results from multiple
+       queries, not just the first
+    3. No 429 warnings logged during the search loop
 
 TICKET 014 — BacktestWorkflow [DONE]
 - Implements BaseWorkflow

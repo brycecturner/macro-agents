@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import UTC, datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.integrations.anthropic_client import AnthropicResponse
 from app.integrations.web_search_client import SearchResult, WebSearchClientError
@@ -126,6 +128,16 @@ def _make_web_search_client(results: list[SearchResult] | None = None) -> MagicM
 def _make_context() -> WorkflowContext:
     ctx = WorkflowContext(thesis=_make_thesis(), db=MagicMock())
     return ctx
+
+
+# ---------------------------------------------------------------------------
+# Autouse fixture — mock time.sleep so tests don't pause 65s
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def no_sleep(monkeypatch):
+    monkeypatch.setattr("app.workflows.web_research.time.sleep", lambda _: None)
 
 
 # ---------------------------------------------------------------------------
@@ -367,7 +379,7 @@ class TestWebResearchWorkflowSearchExecution:
         called_queries = [c.args[0] for c in web_search.search.call_args_list]
         assert "Duration Trade" in called_queries
 
-    def test_queries_capped_at_five(self):
+    def test_queries_capped_at_three(self):
         six_queries = [f"query {i}" for i in range(6)]
         web_search = _make_web_search_client()
         anthropic = _make_anthropic_client(
@@ -377,7 +389,7 @@ class TestWebResearchWorkflowSearchExecution:
             web_search_client=web_search, anthropic_client=anthropic
         )
         workflow.execute(_make_thesis(), _make_context())
-        assert web_search.search.call_count == 5
+        assert web_search.search.call_count == 3
 
     def test_failed_search_does_not_raise(self):
         web_search = MagicMock()
@@ -431,7 +443,7 @@ class TestWebResearchWorkflowCandidateHandling:
         assert urls.count(shared_url) == 1
 
     def test_candidates_capped_at_ten(self):
-        # 3 queries × 5 results = 15, should be capped at 10 before annotation call
+        # 3 queries × 5 results = 15, capped at 10 before annotation call
         web_search = MagicMock()
         web_search.search.side_effect = [
             _make_search_results(n=5, base_url="https://q1.com/a"),

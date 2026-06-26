@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 
 from app.integrations.anthropic_client import AnthropicClient
@@ -42,9 +43,11 @@ from app.workflows.base import (
 
 logger = logging.getLogger(__name__)
 
-# Maximum queries to execute (LLM is asked to produce 3-5).
+# Maximum queries to execute. Capped at 3 to stay within Tier 1 token rate
+# limits (30k input tokens/min) — each search drives a multi-turn tool_use
+# loop that saturates the budget; fewer calls is the right fix over sleeping.
 # TODO: move to workflow_configs table — see future_improvements.md
-_N_QUERIES_MAX = 5
+_N_QUERIES_MAX = 3
 
 # Maximum candidate sources to collect before LLM selection.
 # TODO: move to workflow_configs table — see future_improvements.md
@@ -362,6 +365,14 @@ class WebResearchWorkflow(BaseWorkflow):
                 agent_inferences=agent_inferences,
                 raw_output=query_response.content,
             )
+
+        # Web search calls consume most of the Tier 1 token rate limit (30k
+        # input tokens/min). Sleep 65s to let the window reset before the
+        # annotation call, which would otherwise fail with 429 immediately.
+        logger.debug(
+            "WebResearchWorkflow: sleeping 65s to reset rate limit window before annotation"
+        )
+        time.sleep(65)
 
         # --- Step 3: LLM annotation and selection ---
         annotation_response = anthropic.complete(
