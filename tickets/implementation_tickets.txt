@@ -139,7 +139,7 @@ TICKET 010 — MacroContextWorkflow [DONE]
 - Agent inferences explicitly flagged in agent_inferences field
 - Tests confirm correct FRED series selection and citation format
 
-TICKET 011 — HistoricalAnalogWorkflow 
+TICKET 011 — HistoricalAnalogWorkflow [DONE]
 - Implements BaseWorkflow
 - Identifies 2-4 historical periods with macro configurations similar to
   the current backdrop using FRED data
@@ -149,7 +149,7 @@ TICKET 011 — HistoricalAnalogWorkflow
 - Depends on MacroContextWorkflow result in context
 - Tests confirm analog identification and citation requirements
 
-TICKET 012 — InstrumentAnalysisWorkflow
+TICKET 012 — InstrumentAnalysisWorkflow [DONE]
 - Implements BaseWorkflow
 - Pulls 5-year price history for the thesis instrument(s) from IBKR
 - Computes: annualized return, annualized volatility, max drawdown,
@@ -159,7 +159,7 @@ TICKET 012 — InstrumentAnalysisWorkflow
 - All data cited with IBKR source label and timestamp
 - Tests confirm correct computation of all statistics
 
-TICKET 013 — WebResearchWorkflow
+TICKET 013 — WebResearchWorkflow [DONE]
 - Implements BaseWorkflow
 - Runs 3-5 targeted web searches relevant to the thesis
 - Collects up to 10 candidate sources across all searches
@@ -169,7 +169,7 @@ TICKET 013 — WebResearchWorkflow
 - All web sources cited with full URL and retrieval date
 - Tests confirm search execution, ranking logic, and annotation generation
 
-TICKET 014 — BacktestWorkflow
+TICKET 014 — BacktestWorkflow [DONE]
 - Implements BaseWorkflow
 - Proxy-based historical analog analysis — NOT a rules-based backtest
 - Consumes analog periods from HistoricalAnalogWorkflow and instrument
@@ -185,7 +185,7 @@ TICKET 014 — BacktestWorkflow
 - All data cited with FRED, OECD, and IBKR source labels
 - Tests confirm correct return/drawdown calculations and benchmark comparison
 
-TICKET 015 — FalsificationGenerationWorkflow
+TICKET 015 — FalsificationGenerationWorkflow [DONE]
 - Implements BaseWorkflow
 - Generates 3-5 falsification conditions based on thesis content and prior
   workflow results
