@@ -4,6 +4,20 @@ Decisions that were consciously deferred during implementation. Captured here so
 
 ---
 
+## Pydantic Validation on Workflow Structured Output
+
+Currently, `WorkflowResult.structured_output` is an untyped `dict`. Each workflow parses the LLM response with `json.loads()` and extracts fields via `.get()` with silent defaults. A malformed LLM response (wrong field names, wrong types, missing required fields) passes through as empty or partial data rather than failing loudly.
+
+**Proposed improvement:** Define a per-workflow Pydantic output model (e.g. `HistoricalAnalogOutput`, `RecommendationOutput`) and validate the parsed LLM JSON against it before storing in `structured_output`. Use `model_validate` with `extra='ignore'` so unexpected fields don't raise — the goal is catching structural failures, not enforcing perfect conformance.
+
+**Where to add it:** At the `structured_output` boundary in each workflow's `execute()` method, after `json.loads()` and before returning `WorkflowResult`. This is the point where downstream workflows consume the data, so catching bad shapes here prevents silent propagation.
+
+**Skip:** Validating the raw LLM string before `json.loads()` — brittleness outweighs the benefit there.
+
+**Revisit when:** A downstream workflow silently receives bad data due to an upstream shape mismatch, or when adding new workflows where the output contract needs to be explicit.
+
+---
+
 ## FRED Release ID Mapping (deferred during Ticket 005)
 
 Currently hardcoded in `app/core/constants.py` as a static dict mapping trigger type names (e.g. `CPI_RELEASE`) to FRED numeric release IDs.

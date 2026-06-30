@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}New Trade Idea — Macro Agents{% endblock %}
+
+{% block content %}
+<h1>New Trade Idea</h1>
+
+{% if errors.__root__ %}
+<div class="root-error">{{ errors.__root__ }}</div>
+{% endif %}
+
+<form method="post" action="/theses">
+    <div class="field-row {% if errors.thesis_title %}field-error{% endif %}">
+        <label for="thesis_title">Title</label>
+        <input
+            type="text"
+            id="thesis_title"
+            name="thesis_title"
+            value="{{ values.get('thesis_title', '') }}"
+            placeholder="e.g. Yield Curve Steepener"
+            autocomplete="off"
+        >
+        {% if errors.thesis_title %}
+        <p class="error-msg">{{ errors.thesis_title }}</p>
+        {% endif %}
+    </div>
+
+    <div class="field-row {% if errors.time_horizon %}field-error{% endif %}">
+        <label for="time_horizon">Time Horizon</label>
+        <input
+            type="text"
+            id="time_horizon"
+            name="time_horizon"
+            value="{{ values.get('time_horizon', '') }}"
+            placeholder="e.g. 6 months, 1 year"
+            autocomplete="off"
+        >
+        {% if errors.time_horizon %}
+        <p class="error-msg">{{ errors.time_horizon }}</p>
+        {% endif %}
+    </div>
+
+    <div class="field-row {% if errors.direction %}field-error{% endif %}">
+        <label for="direction">Direction</label>
+        <select id="direction" name="direction">
+            <option value="" {% if not values.get('direction') %}selected{% endif %} disabled>Select…</option>
+            <option value="long"  {% if values.get('direction') == 'long'  %}selected{% endif %}>Long</option>
+            <option value="short" {% if values.get('direction') == 'short' %}selected{% endif %}>Short</option>
+        </select>
+        {% if errors.direction %}
+        <p class="error-msg">{{ errors.direction }}</p>
+        {% endif %}
+    </div>
+
+    <div class="field-row {% if errors.notes %}field-error{% endif %}">
+        <label for="notes">Notes</label>
+        <textarea
+            id="notes"
+            name="notes"
+            rows="10"
+            placeholder="Describe the macro thesis, key assumptions, instrument ideas, and any conditions that would invalidate it…"
+        >{{ values.get('notes', '') }}</textarea>
+        {% if errors.notes %}
+        <p class="error-msg">{{ errors.notes }}</p>
+        {% endif %}
+    </div>
+
+    <button type="submit">Submit Idea →</button>
+</form>
+{% endblock %}

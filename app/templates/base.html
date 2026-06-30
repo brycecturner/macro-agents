@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Macro Agents{% endblock %}</title>
+    <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+
+        :root {
+            --bg:          #0d0d0f;
+            --surface:     #17171a;
+            --border:      #2c2c31;
+            --text:        #e8e8ec;
+            --text-muted:  #7a7a85;
+            --accent:      #6b8ef5;
+            --error:       #f05060;
+            --error-bg:    #2a0d10;
+            --error-border:#5a1a20;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 0 2rem 4rem;
+        }
+
+        /* ── Nav ─────────────────────────────────────────── */
+        nav {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 0;
+            margin-bottom: 2.5rem;
+        }
+        .nav-pod {
+            display: flex;
+            flex-direction: column;
+            margin-right: auto;
+            line-height: 1.2;
+        }
+        .nav-pod-name {
+            font-weight: 700;
+            font-size: 0.95rem;
+            color: var(--text);
+            text-decoration: none;
+        }
+        .nav-pod-name:hover { color: var(--accent); }
+        .nav-pod-id {
+            font-size: 0.7rem;
+            font-family: monospace;
+            color: var(--text-muted);
+            margin-top: 1px;
+        }
+        nav a.nav-link {
+            text-decoration: none;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+        nav a.nav-link:hover { color: var(--text); }
+
+        /* ── Trading mode badge ──────────────────────────── */
+        .mode-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.3rem 0.75rem;
+            border-radius: 5px;
+            font-size: 0.75rem;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            border: 1px solid;
+        }
+        .mode-badge-paper {
+            background: #0d1a12;
+            color: #4fc87a;
+            border-color: #1a3824;
+        }
+        .mode-badge-real {
+            background: #2a0000;
+            color: #ff4444;
+            border-color: #5a0000;
+            animation: pulse-border 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse-border {
+            0%, 100% { border-color: #5a0000; }
+            50%       { border-color: #cc0000; }
+        }
+        .mode-dot {
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .mode-badge-paper .mode-dot { background: #4fc87a; }
+        .mode-badge-real  .mode-dot { background: #ff4444; box-shadow: 0 0 6px #ff4444; }
+
+        /* ── Typography ──────────────────────────────────── */
+        h1 { font-size: 1.5rem; font-weight: 700; margin: 0 0 1.5rem; }
+
+        /* ── Form elements ───────────────────────────────── */
+        label {
+            display: block;
+            font-weight: 600;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.35rem;
+            margin-top: 1.25rem;
+        }
+        input[type="text"], textarea, select {
+            width: 100%;
+            padding: 0.55rem 0.75rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            color: var(--text);
+            font-size: 1rem;
+            font-family: inherit;
+        }
+        input[type="text"]:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        select option { background: var(--surface); }
+        .field-error input,
+        .field-error textarea,
+        .field-error select { border-color: var(--error); }
+        .error-msg { color: var(--error); font-size: 0.825rem; margin-top: 0.3rem; }
+        .root-error {
+            background: var(--error-bg);
+            border: 1px solid var(--error-border);
+            border-radius: 5px;
+            padding: 0.75rem 1rem;
+            color: var(--error);
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+        }
+        button[type="submit"] {
+            margin-top: 1.75rem;
+            padding: 0.6rem 1.75rem;
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        button[type="submit"]:hover { opacity: 0.85; }
+
+        /* ── Status badges ───────────────────────────────── */
+        .badge {
+            display: inline-block;
+            padding: 0.2rem 0.65rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+        .badge-draft        { background: #1e1e22; color: var(--text-muted); }
+        .badge-intake_sent  { background: #0d1a2a; color: #5b9cf6; }
+        .badge-researched   { background: #0d1a12; color: #4fc87a; }
+        .badge-approved     { background: #1a1400; color: #c8a83a; }
+        .badge-active       { background: #0a1f0f; color: #3ddb74; }
+        .badge-closed       { background: #1e1e22; color: #666; }
+        .badge-rejected     { background: #2a0d10; color: var(--error); }
+
+        /* ── Detail fields ───────────────────────────────── */
+        .field-row   { margin-bottom: 1.25rem; }
+        .field-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+        .field-value { margin-top: 0.3rem; font-size: 1rem; }
+        .field-value.pre { white-space: pre-wrap; }
+        .meta-grid { display: flex; gap: 2.5rem; flex-wrap: wrap; margin-bottom: 1.75rem; }
+    </style>
+</head>
+<body>
+<nav>
+    <div class="nav-pod">
+        {% if pod %}
+        <a class="nav-pod-name" href="/">{{ pod.name }}</a>
+        <span class="nav-pod-id">{{ pod.id }}</span>
+        {% else %}
+        <span class="nav-pod-name">Macro Agents</span>
+        {% endif %}
+    </div>
+
+    {% if pod_config %}
+        {% if pod_config.trading_mode.value == 'real' %}
+        <span class="mode-badge mode-badge-real">
+            <span class="mode-dot"></span>LIVE TRADING
+        </span>
+        {% else %}
+        <span class="mode-badge mode-badge-paper">
+            <span class="mode-dot"></span>PAPER
+        </span>
+        {% endif %}
+    {% endif %}
+
+    <a class="nav-link" href="/theses/new">New Idea</a>
+</nav>
+<main>
+    {% block content %}{% endblock %}
+</main>
+</body>
+</html>

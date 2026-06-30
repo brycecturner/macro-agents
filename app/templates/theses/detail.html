@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}{{ thesis.title }} — Macro Agents{% endblock %}
+
+{% block content %}
+<h1>{{ thesis.title }}</h1>
+
+<div class="meta-grid">
+    <div class="field-row">
+        <div class="field-label">Status</div>
+        <div class="field-value">
+            <span class="badge badge-{{ thesis.status.value }}">
+                {{ thesis.status.value | replace('_', ' ') }}
+            </span>
+        </div>
+    </div>
+
+    <div class="field-row">
+        <div class="field-label">Direction</div>
+        <div class="field-value">{{ thesis.direction.value | capitalize }}</div>
+    </div>
+
+    <div class="field-row">
+        <div class="field-label">Time Horizon</div>
+        <div class="field-value">{{ thesis.time_horizon }}</div>
+    </div>
+</div>
+
+{% if thesis.notes %}
+<div class="field-row">
+    <div class="field-label">Notes</div>
+    <div class="field-value pre">{{ thesis.notes }}</div>
+</div>
+{% endif %}
+{% endblock %}

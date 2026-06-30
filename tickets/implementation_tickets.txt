@@ -266,7 +266,7 @@ TICKET 016 — RecommendationWorkflow [DONE]
 SECTION 4: IDEA PIPELINE — INPUT & INTAKE
 ═══════════════════════════════════════════════
 
-TICKET 017 — Idea Input UI & API
+TICKET 017 [DONE] — Idea Input UI & API
 - FastAPI route POST /theses accepts thesis_title, time_horizon, direction,
   and freeform notes
 - Input validated: all three required fields must be non-empty

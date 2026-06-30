@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api.debug import router as debug_router
+from app.api.theses import router as theses_router
 from app.core.database import get_db, get_session_factory
 from app.workflows.runner import register_workflows
 
@@ -28,6 +29,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Macro Agents", version="0.1.0", lifespan=lifespan)
 app.include_router(debug_router)
+app.include_router(theses_router)
 
 
 @app.get("/health")
