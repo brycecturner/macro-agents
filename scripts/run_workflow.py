@@ -489,7 +489,9 @@ def main() -> None:
     # Build context once; prior_results accumulates across steps
     from app.workflows.base import WorkflowContext
 
-    context = WorkflowContext(thesis=thesis, db=stub_db, pod_settings=_stub_pod_settings())
+    context = WorkflowContext(
+        thesis=thesis, db=stub_db, pod_settings=_stub_pod_settings()
+    )
 
     # Run predecessor workflows, accumulating results into context
     for step_name in predecessors:

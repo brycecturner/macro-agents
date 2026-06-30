@@ -149,7 +149,7 @@ TICKET 011 — HistoricalAnalogWorkflow [DONE]
 - Depends on MacroContextWorkflow result in context
 - Tests confirm analog identification and citation requirements
 
-TICKET 011b — BUG: HistoricalAnalogWorkflow always returns invalid JSON
+TICKET 011b — BUG: HistoricalAnalogWorkflow always returns invalid JSON [DONE]
 - Symptom: every run logs "HistoricalAnalogWorkflow: LLM response was not
   valid JSON"; status still returns completed because the workflow handles
   the parse error gracefully, but structured_output is empty/degraded

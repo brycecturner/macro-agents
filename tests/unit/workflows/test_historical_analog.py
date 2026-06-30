@@ -440,3 +440,26 @@ class TestHistoricalAnalogWorkflowLLM:
 
         content = anthropic.complete.call_args[1]["messages"][0]["content"]
         assert "Inflation Breakout Trade" in content
+
+    def test_max_tokens_is_at_least_4096(self):
+        anthropic = _make_anthropic_client()
+        workflow = HistoricalAnalogWorkflow(anthropic_client=anthropic)
+        workflow.execute(_make_thesis(), _make_context())
+
+        call_kwargs = anthropic.complete.call_args[1]
+        assert call_kwargs["max_tokens"] >= 4096
+
+    def test_truncated_response_returns_empty_analogs(self):
+        truncated = AnthropicResponse(
+            content='{"analogs": [{"start_date": "2006-06", "end_date"',
+            model="claude-sonnet-4-6",
+            input_tokens=8500,
+            output_tokens=4096,
+            stop_reason="max_tokens",
+        )
+        workflow = HistoricalAnalogWorkflow(
+            anthropic_client=_make_anthropic_client(truncated)
+        )
+        result = workflow.execute(_make_thesis(), _make_context())
+        assert result.status == WorkflowStatus.COMPLETED
+        assert result.structured_output["analogs"] == []

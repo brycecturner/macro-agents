@@ -27,10 +27,10 @@ import sys
 import uuid
 from datetime import UTC, datetime
 
+from app.core.pod_settings import PodSettings
 from app.core.settings import get_settings
 from app.integrations.ibkr_client import IBKRClient, IBKRClientError
 from app.models.enums import KillAuthority, TradingMode
-from app.core.pod_settings import PodSettings
 
 
 def _paper_settings() -> PodSettings:
@@ -53,7 +53,7 @@ def _check(label: str, fn) -> bool:
     print(f"CHECK: {label}")
     try:
         result = fn()
-        print(f"  PASS")
+        print("  PASS")
         print(f"  {result}")
         return True
     except IBKRClientError as exc:
@@ -88,7 +88,7 @@ def main() -> None:
         pod_settings=_paper_settings(),
     )
 
-    print(f"IBKR Connectivity Smoke Test")
+    print("IBKR Connectivity Smoke Test")
     print(f"Gateway : {settings.ibkr_base_url}")
     print(f"Account : {settings.ibkr_paper_account_id} (paper)")
     print(f"Started : {datetime.now(tz=UTC).isoformat()}")

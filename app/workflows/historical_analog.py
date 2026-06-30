@@ -194,18 +194,28 @@ class HistoricalAnalogWorkflow(BaseWorkflow):
             workflow_run_id=context.current_workflow_run_id,
             thesis_id=thesis.id,
             pod_id=getattr(thesis, "pod_id", None),
-            max_tokens=2048,
+            max_tokens=4096,
             system=_SYSTEM_PROMPT,
         )
 
-        try:
-            parsed = json.loads(response.content)
-            analogs = parsed.get("analogs", [])
-            agent_inferences = parsed.get("agent_inferences", [])
-        except (json.JSONDecodeError, AttributeError):
-            logger.warning("HistoricalAnalogWorkflow: LLM response was not valid JSON")
+        if response.stop_reason == "max_tokens":
+            logger.warning(
+                "HistoricalAnalogWorkflow: response truncated at max_tokens — "
+                "consider raising limit or reducing context"
+            )
             analogs = []
             agent_inferences = []
+        else:
+            try:
+                parsed = json.loads(response.content)
+                analogs = parsed.get("analogs", [])
+                agent_inferences = parsed.get("agent_inferences", [])
+            except (json.JSONDecodeError, AttributeError):
+                logger.warning(
+                    "HistoricalAnalogWorkflow: LLM response was not valid JSON"
+                )
+                analogs = []
+                agent_inferences = []
 
         # Cite the FRED series consumed from MacroContextWorkflow.
         # Retrieval dates come from the prior result's citations where available.

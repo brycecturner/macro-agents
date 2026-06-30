@@ -370,7 +370,8 @@ class WebResearchWorkflow(BaseWorkflow):
         # input tokens/min). Sleep 65s to let the window reset before the
         # annotation call, which would otherwise fail with 429 immediately.
         logger.debug(
-            "WebResearchWorkflow: sleeping 65s to reset rate limit window before annotation"
+            "WebResearchWorkflow: sleeping 65s to reset rate limit window"
+            " before annotation"
         )
         time.sleep(65)
 
