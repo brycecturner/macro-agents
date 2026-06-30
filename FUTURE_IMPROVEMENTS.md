@@ -53,6 +53,19 @@ The IBKR Client Portal news endpoint was evaluated and ruled out: it requires a 
 
 ---
 
+## Inter-Query Rate Limiting in WebResearchWorkflow (closed as resolved by Ticket 013b)
+
+TICKET-013c described a symptom where queries 2 and 3 in `WebResearchWorkflow` were silently dropped by Tier 1 rate limit 429s, with only the first query's results reaching the annotation step. It was marked [DONE] because the 013b fix (reducing `_N_QUERIES_MAX` from 5 to 3) eliminated the symptom in practice — all 3 queries completed cleanly in subsequent runs.
+
+**Why it may return:** The fix works because 3 queries at current context sizes fit within the Tier 1 token window. If per-query token consumption grows — e.g. from adding more FRED series to macro context, widening the search result payload, or increasing `_N_QUERIES_MAX` again — inter-query 429s will reappear.
+
+**Fix options if it resurfaces (in preference order):**
+1. Upgrade Anthropic account to Tier 2 (60k tokens/min) — no code change
+2. Add a per-query sleep (~65s) between searches — works at Tier 1, adds ~2 min to runs
+3. Narrow search results to primary sources only via `allowed_domains` to reduce tokens per query
+
+---
+
 ## Workflow Chain Registry (flagged during Ticket 013 / run_workflow.py work)
 
 **Move the pipeline execution order from a hardcoded list in `scripts/run_workflow.py` into a database-backed registry.**
