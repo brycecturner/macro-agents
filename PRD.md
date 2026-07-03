@@ -89,17 +89,18 @@ Everything else goes in a **freeform notes field.** The agent is responsible for
 
 Before the full research workflow fires, the agent sends a single intake message to the user. This is **one volley — not an ongoing conversation.** The purpose is to confirm alignment before expensive research work begins, analogous to briefing a research analyst before sending them off.
 
-**The intake message contains three things:**
+**The intake message contains two things:**
 
-1. **Instrument mapping** — "I interpreted this as a long TLT position. Is that correct?"
-2. **Thesis mechanism** — a one-paragraph restatement of the macro thesis as the agent understood it, so the user can catch misinterpretations early.
-3. **Proposed falsification conditions** — 2-3 candidate kill conditions the agent plans to formalize, presented for user confirmation or correction before they're locked in.
+1. **Thesis restatement** — a concise restatement of the thesis as the agent understood it: instrument, direction, time horizon, and the macro mechanism. This lets the user catch misinterpretations before expensive research begins.
+2. **Clarifying questions** — any questions the agent needs answered to run the research pipeline effectively (e.g. ambiguous instrument choice, unclear time horizon, conflicting signals in the notes). If the thesis is unambiguous, this section may be omitted.
+
+Falsification conditions are **not** generated at intake. They are produced by `FalsificationGenerationWorkflow` as part of the full research pipeline, informed by all prior workflow results.
 
 The intake message is displayed in the web UI. The entire intake conversation — submission, one-volley response, and user corrections — happens in the UI. No email is sent at this stage.
 
-**Non-response handling:** If the user does not respond within a configurable timeout (default: 24 hours), the research workflow proceeds using the agent's best interpretation. The final brief must display a prominent, non-dismissible flag: *"Intake confirmation not received — agent proceeded with assumed interpretation. Review instrument mapping and falsification conditions carefully."* This flag persists until the user explicitly acknowledges it via the UI.
+**Non-response handling:** If the user does not respond within a configurable timeout (default: 24 hours), the research workflow proceeds using the agent's best interpretation. The final brief must display a prominent, non-dismissible flag: *"Intake confirmation not received — agent proceeded with assumed interpretation. Review instrument mapping carefully."* This flag persists until the user explicitly acknowledges it via the UI.
 
-**Intake corrections:** If the user responds with corrections, the agent incorporates them and proceeds immediately. No second intake round — one volley is the rule. If the correction is itself ambiguous, the agent proceeds with its best interpretation and flags the remaining uncertainty in the brief.
+**Intake corrections:** If the user responds with corrections or answers to the agent's questions, the agent incorporates them and proceeds immediately. No second intake round — one volley is the rule. If the correction is itself ambiguous, the agent proceeds with its best interpretation and flags the remaining uncertainty in the brief.
 
 ### 4.3 Agent Research Workflow
 

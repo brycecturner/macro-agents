@@ -51,11 +51,21 @@ class Thesis(Base):
         Enum(KillAuthority, name="kill_authority_enum"),
         nullable=False,
     )
-    # True when the intake timed out and the agent proceeded without user
+    # False when the intake timed out and the agent proceeded without user
     # confirmation. Persists until the user explicitly acknowledges it in the UI.
-    intake_unconfirmed: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
+    thesis_confirmed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
     )
+    # Intake agent fields — populated after the LLM generates the intake message
+    intake_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    intake_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    intake_user_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    intake_responded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # pgvector embedding for semantic thesis search (nullable — generated after intake)
     embedding: Mapped[list[float] | None] = mapped_column(
         Vector(EMBEDDING_DIM), nullable=True

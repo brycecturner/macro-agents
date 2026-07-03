@@ -1,4 +1,5 @@
-"""Tests for thesis routes — GET /theses/new, POST /theses, GET /theses/{id}."""
+"""Tests for thesis routes — GET /theses/new, POST /theses, GET /theses/{id},
+POST /theses/{id}/intake-response, POST /theses/{id}/acknowledge-intake."""
 
 from __future__ import annotations
 
@@ -52,6 +53,9 @@ def _make_thesis(
     time_horizon: str = "6 months",
     notes: str = "Long TLT as curve steepens.",
     status: ThesisStatus = ThesisStatus.draft,
+    thesis_confirmed: bool = True,
+    intake_message: str | None = None,
+    intake_user_response: str | None = None,
 ) -> MagicMock:
     t = MagicMock()
     t.id = uuid.uuid4()
@@ -60,6 +64,9 @@ def _make_thesis(
     t.time_horizon = time_horizon
     t.notes = notes
     t.status = status
+    t.thesis_confirmed = thesis_confirmed
+    t.intake_message = intake_message
+    t.intake_user_response = intake_user_response
     return t
 
 
@@ -227,6 +234,10 @@ class TestCreateThesisValidation:
 
 
 class TestCreateThesisSuccess:
+    @pytest.fixture(autouse=True)
+    def _no_intake_bg(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("app.api.theses._run_intake_generation", lambda _: None)
+
     def test_valid_submission_redirects(
         self, client: TestClient, mock_db: MagicMock
     ) -> None:
@@ -268,6 +279,15 @@ class TestCreateThesisSuccess:
 
         saved = mock_db.add.call_args[0][0]
         assert saved.kill_authority == KillAuthority.alert_only
+
+    def test_thesis_confirmed_true_on_creation(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        _configure_db(mock_db)
+        client.post("/theses", data=_VALID_FORM, follow_redirects=False)
+
+        saved = mock_db.add.call_args[0][0]
+        assert saved.thesis_confirmed is True
 
     def test_thesis_direction_stored_correctly(
         self, client: TestClient, mock_db: MagicMock
@@ -381,3 +401,138 @@ class TestThesisDetail:
         _configure_db(mock_db, thesis=thesis)
         response = client.get(f"/theses/{thesis.id}")
         assert f"badge-{status.value}" in response.text
+
+    def test_intake_message_displayed_when_present(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(
+            status=ThesisStatus.intake_sent,
+            intake_message="## Thesis as I Understood It\nLong TLT.",
+        )
+        _configure_db(mock_db, thesis=thesis)
+        response = client.get(f"/theses/{thesis.id}")
+        assert "Long TLT." in response.text
+
+    def test_response_form_shown_when_awaiting_intake(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(
+            status=ThesisStatus.intake_sent,
+            intake_message="Some message.",
+            intake_user_response=None,
+        )
+        _configure_db(mock_db, thesis=thesis)
+        response = client.get(f"/theses/{thesis.id}")
+        assert 'name="user_response"' in response.text
+
+    def test_response_form_hidden_after_user_responds(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(
+            status=ThesisStatus.intake_sent,
+            intake_message="Some message.",
+            intake_user_response="Confirmed.",
+        )
+        _configure_db(mock_db, thesis=thesis)
+        response = client.get(f"/theses/{thesis.id}")
+        assert 'name="user_response"' not in response.text
+        assert "Confirmed." in response.text
+
+    def test_loading_state_shown_when_intake_pending(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.intake_sent, intake_message=None)
+        _configure_db(mock_db, thesis=thesis)
+        response = client.get(f"/theses/{thesis.id}")
+        assert "Generating intake review" in response.text
+
+    def test_unconfirmed_banner_shown_when_thesis_not_confirmed(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(thesis_confirmed=False)
+        _configure_db(mock_db, thesis=thesis)
+        response = client.get(f"/theses/{thesis.id}")
+        assert "Intake not confirmed" in response.text
+
+    def test_unconfirmed_banner_hidden_when_confirmed(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(thesis_confirmed=True)
+        _configure_db(mock_db, thesis=thesis)
+        response = client.get(f"/theses/{thesis.id}")
+        assert "Intake not confirmed" not in response.text
+
+    def test_acknowledge_button_present_when_not_confirmed(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(thesis_confirmed=False)
+        _configure_db(mock_db, thesis=thesis)
+        response = client.get(f"/theses/{thesis.id}")
+        assert "acknowledge-intake" in response.text
+
+
+# ---------------------------------------------------------------------------
+# POST /theses/{thesis_id}/intake-response
+# ---------------------------------------------------------------------------
+
+
+class TestIntakeResponse:
+    def test_redirects_to_detail_on_success(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.intake_sent)
+        _configure_db(mock_db, thesis=thesis)
+        response = client.post(
+            f"/theses/{thesis.id}/intake-response",
+            data={"user_response": "Confirmed."},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert response.headers["location"] == f"/theses/{thesis.id}"
+
+    def test_returns_404_for_missing_thesis(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        _configure_db(mock_db, thesis=None)
+        response = client.post(
+            f"/theses/{uuid.uuid4()}/intake-response",
+            data={"user_response": "OK"},
+        )
+        assert response.status_code == 404
+
+    def test_returns_409_when_not_intake_sent(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.draft)
+        _configure_db(mock_db, thesis=thesis)
+        response = client.post(
+            f"/theses/{thesis.id}/intake-response",
+            data={"user_response": "OK"},
+        )
+        assert response.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# POST /theses/{thesis_id}/acknowledge-intake
+# ---------------------------------------------------------------------------
+
+
+class TestAcknowledgeIntake:
+    def test_redirects_to_detail_on_success(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(thesis_confirmed=False)
+        _configure_db(mock_db, thesis=thesis)
+        response = client.post(
+            f"/theses/{thesis.id}/acknowledge-intake",
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert response.headers["location"] == f"/theses/{thesis.id}"
+
+    def test_returns_404_for_missing_thesis(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        _configure_db(mock_db, thesis=None)
+        response = client.post(f"/theses/{uuid.uuid4()}/acknowledge-intake")
+        assert response.status_code == 404

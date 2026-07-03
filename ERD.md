@@ -47,7 +47,7 @@ erDiagram
         text notes
         enum status "draft | intake_sent | researched | approved | active | closed | rejected"
         enum kill_authority "alert_only | auto_close"
-        boolean intake_unconfirmed
+        boolean thesis_confirmed
         vector embedding
         timestamp closed_at
         timestamp created_at

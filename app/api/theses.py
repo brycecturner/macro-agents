@@ -1,20 +1,25 @@
-"""Thesis routes — idea input form and detail page."""
+"""Thesis routes — idea input form, detail page, and intake conversation."""
 
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import get_db, get_session_factory
+from app.core.settings import get_settings
 from app.models.enums import Direction, KillAuthority, ThesisStatus
 from app.models.pod import Pod, PodConfig
 from app.models.thesis import Thesis
+from app.services.intake_service import IntakeService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["theses"])
 
@@ -29,6 +34,28 @@ def _get_pod_context(db: Session) -> dict:
         db.query(PodConfig).filter(PodConfig.pod_id == pod.id).first() if pod else None
     )
     return {"pod": pod, "pod_config": pod_config}
+
+
+def _run_intake_generation(thesis_id: uuid.UUID) -> None:
+    """Background task: generate intake message for a newly created thesis."""
+    settings = get_settings()
+    if not settings.anthropic_api_key:
+        logger.warning(
+            "ANTHROPIC_API_KEY not configured — intake skipped for thesis %s",
+            thesis_id,
+        )
+        return
+    db = get_session_factory()()
+    try:
+        thesis = db.query(Thesis).filter(Thesis.id == thesis_id).first()
+        if thesis is None:
+            logger.error("Thesis %s not found for intake generation", thesis_id)
+            return
+        IntakeService().generate_intake_message(thesis, db, settings.anthropic_api_key)
+    except Exception:
+        logger.exception("Failed to generate intake message for thesis %s", thesis_id)
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +74,7 @@ def new_thesis_form(
 
 
 # ---------------------------------------------------------------------------
-# POST /theses — create thesis, redirect to detail on success
+# POST /theses — create thesis, trigger intake generation, redirect to detail
 # ---------------------------------------------------------------------------
 
 
@@ -55,6 +82,7 @@ def new_thesis_form(
 def create_thesis(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
+    background_tasks: BackgroundTasks,
     thesis_title: Annotated[str, Form()] = "",
     time_horizon: Annotated[str, Form()] = "",
     direction: Annotated[str, Form()] = "",
@@ -124,10 +152,12 @@ def create_thesis(
         notes=notes_val,
         status=ThesisStatus.draft,
         kill_authority=kill_authority,
-        intake_unconfirmed=False,
+        thesis_confirmed=True,
     )
     db.add(thesis)
     db.commit()
+
+    background_tasks.add_task(_run_intake_generation, thesis.id)
 
     return RedirectResponse(url=f"/theses/{thesis.id}", status_code=303)
 
@@ -149,3 +179,44 @@ def thesis_detail(
     return templates.TemplateResponse(
         request, "theses/detail.html", {"thesis": thesis, **_get_pod_context(db)}
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /theses/{thesis_id}/intake-response — user responds to intake message
+# ---------------------------------------------------------------------------
+
+
+@router.post("/theses/{thesis_id}/intake-response", response_class=HTMLResponse)
+def intake_response(
+    request: Request,
+    thesis_id: uuid.UUID,
+    db: Annotated[Session, Depends(get_db)],
+    user_response: Annotated[str, Form()] = "",
+) -> HTMLResponse:
+    thesis = db.query(Thesis).filter(Thesis.id == thesis_id).first()
+    if thesis is None:
+        raise HTTPException(status_code=404, detail="Thesis not found")
+    if thesis.status != ThesisStatus.intake_sent:
+        raise HTTPException(
+            status_code=409, detail="Thesis is not awaiting an intake response."
+        )
+    IntakeService().handle_intake_response(thesis, user_response, db)
+    return RedirectResponse(url=f"/theses/{thesis_id}", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# POST /theses/{thesis_id}/acknowledge-intake — user dismisses the warning banner
+# ---------------------------------------------------------------------------
+
+
+@router.post("/theses/{thesis_id}/acknowledge-intake", response_class=HTMLResponse)
+def acknowledge_intake(
+    request: Request,
+    thesis_id: uuid.UUID,
+    db: Annotated[Session, Depends(get_db)],
+) -> HTMLResponse:
+    thesis = db.query(Thesis).filter(Thesis.id == thesis_id).first()
+    if thesis is None:
+        raise HTTPException(status_code=404, detail="Thesis not found")
+    IntakeService.acknowledge_intake(thesis, db)
+    return RedirectResponse(url=f"/theses/{thesis_id}", status_code=303)

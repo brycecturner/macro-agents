@@ -10,6 +10,6 @@
 - Human decision field (Go / No-Go / Hold for review) rendered as buttons
 - On decision: thesis status updated, decision logged to audit_log with
   timestamp
-- intake_unconfirmed flag displayed prominently if set; dismissal button
+- thesis_confirmed=False banner displayed prominently; dismissal button
   logs acknowledgment to audit_log
 - Tests confirm all fields render and decision buttons update status correctly

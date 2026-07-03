@@ -2,6 +2,76 @@
 
 {% block title %}{{ thesis.title }} — Macro Agents{% endblock %}
 
+{% block extra_css %}
+<style>
+    .intake-warning {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1.5rem;
+        background: #2a1a00;
+        border: 1px solid #5a3a00;
+        border-radius: 6px;
+        padding: 1rem 1.25rem;
+        margin-bottom: 2rem;
+        color: #e8a020;
+    }
+    .intake-warning p { margin: 0; font-size: 0.9rem; line-height: 1.5; }
+    .intake-warning strong { color: #f0b840; }
+    .btn-ghost {
+        padding: 0.4rem 1rem;
+        background: transparent;
+        border: 1px solid #5a3a00;
+        border-radius: 4px;
+        color: #e8a020;
+        font-size: 0.8rem;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+        font-family: inherit;
+    }
+    .btn-ghost:hover { background: #3a2500; }
+
+    .intake-section {
+        margin-top: 2rem;
+        border-top: 1px solid var(--border);
+        padding-top: 1.75rem;
+    }
+    .section-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+        margin-bottom: 1rem;
+    }
+    .intake-message {
+        white-space: pre-wrap;
+        font-size: 0.95rem;
+        line-height: 1.7;
+        color: var(--text);
+    }
+    .intake-response-form {
+        margin-top: 1.75rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--border);
+    }
+    .field-hint {
+        font-size: 0.825rem;
+        color: var(--text-muted);
+        margin: 0.25rem 0 0.75rem;
+    }
+    .intake-response-form textarea {
+        margin-top: 0;
+    }
+    .intake-loading {
+        margin-top: 2rem;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <h1>{{ thesis.title }}</h1>
 
@@ -32,4 +102,50 @@
     <div class="field-value pre">{{ thesis.notes }}</div>
 </div>
 {% endif %}
+
+{# ── Unconfirmed intake warning banner ──────────────────────────────────── #}
+{% if not thesis.thesis_confirmed %}
+<div class="intake-warning">
+    <p>
+        <strong>Intake not confirmed.</strong>
+        The agent proceeded with its assumed interpretation after the timeout
+        elapsed without a response. Review the thesis restatement below carefully.
+    </p>
+    <form method="post" action="/theses/{{ thesis.id }}/acknowledge-intake">
+        <button type="submit" class="btn-ghost">Acknowledge</button>
+    </form>
+</div>
+{% endif %}
+
+{# ── Intake message and response form ───────────────────────────────────── #}
+{% if thesis.intake_message %}
+<div class="intake-section">
+    <div class="section-label">Intake Review</div>
+    <div class="intake-message">{{ thesis.intake_message }}</div>
+
+    {% if thesis.status.value == 'intake_sent' %}
+        {% if thesis.intake_user_response %}
+        <div class="intake-response-form">
+            <div class="field-label">Your Response</div>
+            <div class="field-value pre" style="margin-top: 0.3rem;">{{ thesis.intake_user_response }}</div>
+        </div>
+        {% else %}
+        <div class="intake-response-form">
+            <div class="field-label">Your Response</div>
+            <p class="field-hint">Correct any misinterpretations or answer the questions above. Leave blank to proceed as-is.</p>
+            <form method="post" action="/theses/{{ thesis.id }}/intake-response">
+                <textarea name="user_response" rows="6" placeholder="Optional — corrections or answers to the agent's questions…"></textarea>
+                <button type="submit">Submit &amp; Start Research</button>
+            </form>
+        </div>
+        {% endif %}
+    {% endif %}
+</div>
+
+{% elif thesis.status.value == 'intake_sent' %}
+<div class="intake-loading">
+    <p>Generating intake review…</p>
+</div>
+{% endif %}
+
 {% endblock %}
