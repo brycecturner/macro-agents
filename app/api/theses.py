@@ -17,6 +17,7 @@ from app.core.settings import get_settings
 from app.models.enums import Direction, KillAuthority, ThesisStatus
 from app.models.pod import Pod, PodConfig
 from app.models.thesis import Thesis
+from app.models.workflow import FurtherReading
 from app.services.intake_service import IntakeService
 from app.services.research_pipeline_service import run_research_pipeline_for_thesis
 from app.services.thesis_decision_service import InvalidDecisionError, record_decision
@@ -178,8 +179,20 @@ def thesis_detail(
     thesis = db.query(Thesis).filter(Thesis.id == thesis_id).first()
     if thesis is None:
         raise HTTPException(status_code=404, detail="Thesis not found")
+    further_reading = (
+        db.query(FurtherReading)
+        .filter(FurtherReading.thesis_id == thesis_id)
+        .order_by(FurtherReading.rank)
+        .all()
+    )
     return templates.TemplateResponse(
-        request, "theses/detail.html", {"thesis": thesis, **_get_pod_context(db)}
+        request,
+        "theses/detail.html",
+        {
+            "thesis": thesis,
+            "further_reading": further_reading,
+            **_get_pod_context(db),
+        },
     )
 
 

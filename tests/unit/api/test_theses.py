@@ -13,6 +13,7 @@ from app.models.enums import Direction, KillAuthority, ThesisStatus, TradingMode
 from app.models.log import AuditLog
 from app.models.pod import Pod, PodConfig
 from app.models.thesis import Thesis
+from app.models.workflow import FurtherReading
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -24,6 +25,7 @@ def _configure_db(
     *,
     thesis: MagicMock | None = None,
     no_pod: bool = False,
+    further_reading: list | None = None,
 ) -> MagicMock:
     """Wire mock_db.query() to return sensible objects per model class."""
     mock_pod = MagicMock()
@@ -41,10 +43,34 @@ def _configure_db(
             q.filter.return_value.first.return_value = mock_config
         elif model is Thesis:
             q.filter.return_value.first.return_value = thesis
+        elif model is FurtherReading:
+            q.filter.return_value.order_by.return_value.all.return_value = (
+                further_reading or []
+            )
         return q
 
     mock_db.query.side_effect = _query
     return mock_pod
+
+
+def _make_further_reading(
+    *,
+    title: str = "Fed Signals Patience on Rate Cuts",
+    url: str = "https://www.federalreserve.gov/newsevents/example",
+    source_type: str = "web",
+    annotation: str = "Directly informs the thesis mechanism around Fed policy.",
+    rank: int = 1,
+    is_cited: bool = True,
+) -> MagicMock:
+    entry = MagicMock()
+    entry.id = uuid.uuid4()
+    entry.title = title
+    entry.url = url
+    entry.source_type = source_type
+    entry.annotation = annotation
+    entry.rank = rank
+    entry.is_cited = is_cited
+    return entry
 
 
 def _make_thesis(
@@ -622,6 +648,76 @@ class TestThesisDetail:
         _configure_db(mock_db, thesis=thesis)
         response = client.get(f"/theses/{thesis.id}")
         assert f"/theses/{thesis.id}/decision" not in response.text
+
+
+# ---------------------------------------------------------------------------
+# GET /theses/{thesis_id} — Further Reading (Tier 3)
+# ---------------------------------------------------------------------------
+
+
+class TestFurtherReadingSection:
+    def test_no_section_when_no_entries(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.researched, brief=_make_brief())
+        _configure_db(mock_db, thesis=thesis, further_reading=[])
+        response = client.get(f"/theses/{thesis.id}")
+        assert "Further Reading" not in response.text
+
+    def test_entry_fields_rendered(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.researched, brief=_make_brief())
+        entry = _make_further_reading(
+            title="Fed Signals Patience on Rate Cuts",
+            url="https://www.federalreserve.gov/newsevents/example",
+            source_type="web",
+            annotation="Directly informs the thesis mechanism around Fed policy.",
+        )
+        _configure_db(mock_db, thesis=thesis, further_reading=[entry])
+        response = client.get(f"/theses/{thesis.id}")
+        assert "Fed Signals Patience on Rate Cuts" in response.text
+        assert 'href="https://www.federalreserve.gov/newsevents/example"' in (
+            response.text
+        )
+        assert "Directly informs the thesis mechanism around Fed policy." in (
+            response.text
+        )
+        assert "Further Reading" in response.text
+
+    def test_source_type_badge_rendered(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.researched, brief=_make_brief())
+        entry = _make_further_reading(source_type="academic paper")
+        _configure_db(mock_db, thesis=thesis, further_reading=[entry])
+        response = client.get(f"/theses/{thesis.id}")
+        assert "academic paper" in response.text
+
+    def test_entries_rendered_in_rank_order(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        cited = _make_further_reading(
+            title="Cited Primary Source", rank=1, is_cited=True
+        )
+        additional = _make_further_reading(
+            title="Additional Context Source", rank=2, is_cited=False
+        )
+        thesis = _make_thesis(status=ThesisStatus.researched, brief=_make_brief())
+        _configure_db(mock_db, thesis=thesis, further_reading=[cited, additional])
+        response = client.get(f"/theses/{thesis.id}")
+        assert response.text.index("Cited Primary Source") < response.text.index(
+            "Additional Context Source"
+        )
+
+    def test_section_rendered_even_without_brief(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.intake_sent, brief=None)
+        entry = _make_further_reading()
+        _configure_db(mock_db, thesis=thesis, further_reading=[entry])
+        response = client.get(f"/theses/{thesis.id}")
+        assert "Further Reading" in response.text
 
 
 # ---------------------------------------------------------------------------

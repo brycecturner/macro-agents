@@ -341,7 +341,7 @@ TICKET 021 — Trade Brief UI (Tier 1) [DONE]
   logs acknowledgment to audit_log
 - Tests confirm all fields render and decision buttons update status correctly
 
-TICKET 022 — Further Reading UI (Tier 3)
+TICKET 022 — Further Reading UI (Tier 3) [DONE]
 - Further reading section rendered at bottom of brief page
 - Each entry shows: title (hyperlinked), source type badge, and one-sentence
   annotation

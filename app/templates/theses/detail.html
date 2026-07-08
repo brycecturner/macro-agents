@@ -370,4 +370,20 @@
 
 {% endif %}
 
+{# ── Tier 3: Further Reading ─────────────────────────────────────────────── #}
+{% if further_reading %}
+<div class="brief-section">
+    <div class="section-label">Further Reading</div>
+    <ul class="source-list">
+        {% for entry in further_reading %}
+        <li class="source-item">
+            <a href="{{ entry.url }}" target="_blank" rel="noopener">{{ entry.title }}</a>
+            <span class="condition-type-badge">{{ entry.source_type }}</span>
+            <div class="field-hint">{{ entry.annotation }}</div>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
 {% endblock %}
