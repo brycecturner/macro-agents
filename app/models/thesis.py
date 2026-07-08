@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -69,6 +69,13 @@ class Thesis(Base):
     # pgvector embedding for semantic thesis search (nullable — generated after intake)
     embedding: Mapped[list[float] | None] = mapped_column(
         Vector(EMBEDDING_DIM), nullable=True
+    )
+    # Assembled Tier 1 trade brief (PRD Section 4.4), stored as JSON and
+    # regenerated whenever the research pipeline completes. Any is unavoidable:
+    # the brief shape is assembled from multiple workflows' typed outputs.
+    brief: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    brief_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     closed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

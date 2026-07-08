@@ -1,0 +1,30 @@
+"""Add brief fields to theses table
+
+Revision ID: 0004
+Revises: 0003
+Create Date: 2026-07-08
+"""
+
+from collections.abc import Sequence
+
+import sqlalchemy as sa
+from alembic import op
+from sqlalchemy.dialects import postgresql
+
+revision: str = "0004"
+down_revision: str | None = "0003"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
+
+
+def upgrade() -> None:
+    op.add_column("theses", sa.Column("brief", postgresql.JSONB(), nullable=True))
+    op.add_column(
+        "theses",
+        sa.Column("brief_generated_at", sa.DateTime(timezone=True), nullable=True),
+    )
+
+
+def downgrade() -> None:
+    op.drop_column("theses", "brief_generated_at")
+    op.drop_column("theses", "brief")

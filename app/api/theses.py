@@ -208,6 +208,24 @@ def intake_response(
 
 
 # ---------------------------------------------------------------------------
+# GET /theses/{thesis_id}/brief — structured Tier 1 trade brief (JSON)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/theses/{thesis_id}/brief")
+def get_thesis_brief(
+    thesis_id: uuid.UUID,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    thesis = db.query(Thesis).filter(Thesis.id == thesis_id).first()
+    if thesis is None:
+        raise HTTPException(status_code=404, detail="Thesis not found")
+    if thesis.brief is None:
+        raise HTTPException(status_code=404, detail="Brief has not been generated yet")
+    return thesis.brief
+
+
+# ---------------------------------------------------------------------------
 # POST /theses/{thesis_id}/acknowledge-intake — user dismisses the warning banner
 # ---------------------------------------------------------------------------
 

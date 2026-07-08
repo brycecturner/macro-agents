@@ -22,6 +22,7 @@ from app.models.enums import ThesisStatus
 from app.models.log import AuditLog
 from app.models.pod import PodConfig
 from app.models.thesis import Thesis
+from app.services.brief_service import store_brief
 from app.workflows.backtest import BacktestWorkflow
 from app.workflows.base import BaseWorkflow, WorkflowResult
 from app.workflows.falsification_generation import FalsificationGenerationWorkflow
@@ -62,6 +63,8 @@ class ResearchPipelineService:
         available (per PRD Section 7: workflow failures are partial, not total).
         """
         results = WorkflowRunner(db).run(thesis, CORE_WORKFLOW_ORDER, pod_settings)
+
+        store_brief(thesis, db)
 
         previous_status = (
             thesis.status.value if hasattr(thesis.status, "value") else thesis.status

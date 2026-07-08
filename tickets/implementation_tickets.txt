@@ -316,7 +316,7 @@ TICKET 019 [DONE] — Research Workflow Orchestration
 SECTION 5: TRADE BRIEF
 ═══════════════════════════════════════════════
 
-TICKET 020 — Trade Brief Storage & Retrieval
+TICKET 020 — Trade Brief Storage & Retrieval [DONE]
 - Brief assembled from workflow_runs outputs and stored as JSON in object
   storage; referenced by thesis_id
 - FastAPI route GET /theses/{thesis_id}/brief returns structured brief data

@@ -570,3 +570,63 @@ class TestAcknowledgeIntake:
         _configure_db(mock_db, thesis=None)
         response = client.post(f"/theses/{uuid.uuid4()}/acknowledge-intake")
         assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /theses/{thesis_id}/brief
+# ---------------------------------------------------------------------------
+
+
+class TestGetThesisBrief:
+    def test_returns_200_when_brief_exists(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.researched)
+        thesis.brief = {"thesis_id": str(thesis.id), "title": thesis.title}
+        _configure_db(mock_db, thesis=thesis)
+        response = client.get(f"/theses/{thesis.id}/brief")
+        assert response.status_code == 200
+
+    def test_response_is_json(self, client: TestClient, mock_db: MagicMock) -> None:
+        thesis = _make_thesis(status=ThesisStatus.researched)
+        thesis.brief = {"thesis_id": str(thesis.id)}
+        _configure_db(mock_db, thesis=thesis)
+        response = client.get(f"/theses/{thesis.id}/brief")
+        assert "application/json" in response.headers["content-type"]
+
+    def test_returns_stored_brief_body(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.researched)
+        thesis.brief = {
+            "thesis_id": str(thesis.id),
+            "summary": "Macro backdrop.",
+            "instrument": "TLT",
+            "direction": "long",
+            "time_horizon": "6 months",
+            "backtest_stats": {"label": "Historical Analog Analysis"},
+            "assumptions": ["Fed cuts continue"],
+            "falsification_conditions": [],
+            "recommendation": {"recommendation": "go"},
+            "source_index": [],
+        }
+        _configure_db(mock_db, thesis=thesis)
+        response = client.get(f"/theses/{thesis.id}/brief")
+        assert response.json() == thesis.brief
+
+    def test_returns_404_for_missing_thesis(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        _configure_db(mock_db, thesis=None)
+        response = client.get(f"/theses/{uuid.uuid4()}/brief")
+        assert response.status_code == 404
+
+    def test_returns_404_when_brief_not_yet_generated(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.intake_sent)
+        thesis.brief = None
+        _configure_db(mock_db, thesis=thesis)
+        response = client.get(f"/theses/{thesis.id}/brief")
+        assert response.status_code == 404
+        assert "not been generated" in response.text

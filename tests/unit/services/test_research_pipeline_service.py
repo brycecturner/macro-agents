@@ -5,6 +5,8 @@ from __future__ import annotations
 import uuid
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.integrations.email_client import EmailClientError
 from app.models.enums import ThesisStatus
 from app.models.log import AuditLog
@@ -34,6 +36,7 @@ def _make_thesis(**kwargs) -> MagicMock:
     t.pod_id = kwargs.get("pod_id", uuid.uuid4())
     t.title = kwargs.get("title", "Yield Curve Steepener")
     t.status = kwargs.get("status", ThesisStatus.intake_sent)
+    t.instruments = kwargs.get("instruments", [])
     return t
 
 
@@ -84,6 +87,11 @@ class TestCoreWorkflowOrder:
 
 
 class TestResearchPipelineServiceRun:
+    @pytest.fixture(autouse=True)
+    def _mock_store_brief(self):
+        with patch("app.services.research_pipeline_service.store_brief") as mock:
+            yield mock
+
     def test_runs_workflow_runner_with_core_order(self):
         thesis = _make_thesis()
         db = MagicMock()
@@ -207,6 +215,33 @@ class TestResearchPipelineServiceRun:
             ResearchPipelineService.run(thesis, db)
 
         mock_send.assert_called_once_with(thesis)
+
+    def test_assembles_and_stores_brief(self, _mock_store_brief: MagicMock):
+        thesis = _make_thesis()
+        db = MagicMock()
+        with (
+            patch("app.services.research_pipeline_service.WorkflowRunner") as cls,
+            patch("app.services.research_pipeline_service._send_completion_email"),
+        ):
+            cls.return_value.run.return_value = []
+            ResearchPipelineService.run(thesis, db)
+
+        _mock_store_brief.assert_called_once_with(thesis, db)
+
+    def test_brief_stored_before_status_commit(self, _mock_store_brief: MagicMock):
+        thesis = _make_thesis()
+        db = MagicMock()
+        call_order: list[str] = []
+        _mock_store_brief.side_effect = lambda *a, **k: call_order.append("store_brief")
+        db.commit.side_effect = lambda: call_order.append("commit")
+        with (
+            patch("app.services.research_pipeline_service.WorkflowRunner") as cls,
+            patch("app.services.research_pipeline_service._send_completion_email"),
+        ):
+            cls.return_value.run.return_value = []
+            ResearchPipelineService.run(thesis, db)
+
+        assert call_order == ["store_brief", "commit"]
 
 
 # ---------------------------------------------------------------------------
