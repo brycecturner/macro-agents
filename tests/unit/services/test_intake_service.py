@@ -154,6 +154,14 @@ class TestHandleIntakeResponse:
 
 
 class TestProcessTimeout:
+    @pytest.fixture(autouse=True)
+    def mock_pipeline(self, monkeypatch) -> MagicMock:
+        mock = MagicMock()
+        monkeypatch.setattr(
+            "app.services.intake_service.run_research_pipeline_for_thesis", mock
+        )
+        return mock
+
     def test_sets_thesis_confirmed_false(self) -> None:
         thesis = _make_thesis(thesis_confirmed=True)
         db = MagicMock()
@@ -165,6 +173,12 @@ class TestProcessTimeout:
         db = MagicMock()
         IntakeService.process_timeout(thesis, db)
         db.commit.assert_called_once()
+
+    def test_triggers_research_pipeline(self, mock_pipeline: MagicMock) -> None:
+        thesis = _make_thesis()
+        db = MagicMock()
+        IntakeService.process_timeout(thesis, db)
+        mock_pipeline.assert_called_once_with(thesis.id)
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +206,14 @@ class TestAcknowledgeIntake:
 
 
 class TestCheckAndProcessTimeouts:
+    @pytest.fixture(autouse=True)
+    def mock_pipeline(self, monkeypatch) -> MagicMock:
+        mock = MagicMock()
+        monkeypatch.setattr(
+            "app.services.intake_service.run_research_pipeline_for_thesis", mock
+        )
+        return mock
+
     def _timed_out_thesis(self) -> MagicMock:
         return _make_thesis(
             thesis_confirmed=True,

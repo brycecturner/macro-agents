@@ -11,7 +11,6 @@ banner until the user explicitly acknowledges it.
 from __future__ import annotations
 
 import logging
-import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
@@ -19,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.integrations.anthropic_client import AnthropicClient
 from app.models.enums import ThesisStatus
 from app.models.thesis import Thesis
+from app.services.research_pipeline_service import run_research_pipeline_for_thesis
 
 logger = logging.getLogger(__name__)
 
@@ -88,24 +88,33 @@ class IntakeService:
     def handle_intake_response(
         self, thesis: Thesis, user_response: str, db: Session
     ) -> None:
-        """Store the user's response/corrections and queue the research pipeline."""
+        """Store the user's response/corrections.
+
+        Does not trigger the research pipeline itself — the caller (the
+        intake-response route) schedules it as a background task, since the
+        pipeline runs multiple sequential LLM calls and should not block the
+        HTTP response.
+        """
         stripped = user_response.strip()
         thesis.intake_user_response = stripped if stripped else None
         thesis.intake_responded_at = datetime.now(UTC)
         db.commit()
         logger.info("Intake response recorded for thesis %s", thesis.id)
-        _schedule_research(thesis.id)
 
     @staticmethod
     def process_timeout(thesis: Thesis, db: Session) -> None:
-        """Set thesis_confirmed=False and proceed to research anyway."""
+        """Set thesis_confirmed=False and proceed to research anyway.
+
+        Runs synchronously — this is called from the hourly intake-timeout
+        APScheduler job, which already executes off the request thread.
+        """
         thesis.thesis_confirmed = False
         db.commit()
         logger.warning(
             "Intake timed out for thesis %s — proceeding with assumed interpretation",
             thesis.id,
         )
-        _schedule_research(thesis.id)
+        run_research_pipeline_for_thesis(thesis.id)
 
     @staticmethod
     def acknowledge_intake(thesis: Thesis, db: Session) -> None:
@@ -134,11 +143,3 @@ class IntakeService:
         for thesis in timed_out:
             IntakeService.process_timeout(thesis, db)
         return len(timed_out)
-
-
-def _schedule_research(thesis_id: uuid.UUID) -> None:
-    """Queue the full research pipeline for this thesis.
-
-    Stub — TICKET 019 connects this to WorkflowRunner.
-    """
-    logger.info("Research pipeline queued for thesis %s (TICKET 019)", thesis_id)

@@ -477,6 +477,12 @@ class TestThesisDetail:
 
 
 class TestIntakeResponse:
+    @pytest.fixture(autouse=True)
+    def mock_research_pipeline(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+        mock = MagicMock()
+        monkeypatch.setattr("app.api.theses.run_research_pipeline_for_thesis", mock)
+        return mock
+
     def test_redirects_to_detail_on_success(
         self, client: TestClient, mock_db: MagicMock
     ) -> None:
@@ -510,6 +516,34 @@ class TestIntakeResponse:
             data={"user_response": "OK"},
         )
         assert response.status_code == 409
+
+    def test_schedules_research_pipeline_background_task(
+        self,
+        client: TestClient,
+        mock_db: MagicMock,
+        mock_research_pipeline: MagicMock,
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.intake_sent)
+        _configure_db(mock_db, thesis=thesis)
+        client.post(
+            f"/theses/{thesis.id}/intake-response",
+            data={"user_response": "Confirmed."},
+            follow_redirects=False,
+        )
+        mock_research_pipeline.assert_called_once_with(thesis.id)
+
+    def test_does_not_schedule_pipeline_when_thesis_not_found(
+        self,
+        client: TestClient,
+        mock_db: MagicMock,
+        mock_research_pipeline: MagicMock,
+    ) -> None:
+        _configure_db(mock_db, thesis=None)
+        client.post(
+            f"/theses/{uuid.uuid4()}/intake-response",
+            data={"user_response": "OK"},
+        )
+        mock_research_pipeline.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

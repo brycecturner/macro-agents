@@ -18,6 +18,7 @@ from app.models.enums import Direction, KillAuthority, ThesisStatus
 from app.models.pod import Pod, PodConfig
 from app.models.thesis import Thesis
 from app.services.intake_service import IntakeService
+from app.services.research_pipeline_service import run_research_pipeline_for_thesis
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,7 @@ def intake_response(
     request: Request,
     thesis_id: uuid.UUID,
     db: Annotated[Session, Depends(get_db)],
+    background_tasks: BackgroundTasks,
     user_response: Annotated[str, Form()] = "",
 ) -> HTMLResponse:
     thesis = db.query(Thesis).filter(Thesis.id == thesis_id).first()
@@ -201,6 +203,7 @@ def intake_response(
             status_code=409, detail="Thesis is not awaiting an intake response."
         )
     IntakeService().handle_intake_response(thesis, user_response, db)
+    background_tasks.add_task(run_research_pipeline_for_thesis, thesis_id)
     return RedirectResponse(url=f"/theses/{thesis_id}", status_code=303)
 
 

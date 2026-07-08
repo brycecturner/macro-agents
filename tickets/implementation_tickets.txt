@@ -298,7 +298,7 @@ TICKET 018 [DONE] — Intake Agent
   acknowledges it via the UI
 - Tests confirm intake generation, UI response handling, and timeout behavior
 
-TICKET 019 — Research Workflow Orchestration
+TICKET 019 [DONE] — Research Workflow Orchestration
 - WorkflowRunner triggered automatically after intake confirmation or timeout
 - Runs all 7 core workflows sequentially in order defined in PRD Section 4.3
 - Brief assembled from all WorkflowResult objects and stored
