@@ -570,8 +570,10 @@ Alternative data (sentiment, positioning, transcripts) is out of scope for v1.
 
 ### 8.2 Data Storage
 
-- **PostgreSQL with pgvector:** All structured data and semantic search. Single database for v1. pgvector extension handles embedding storage for thesis search.
-- **Object storage (S3 or local filesystem for early dev):** Full research brief documents and backtest output stored as JSON. Referenced by ID from the `workflow_runs` table.
+- **PostgreSQL with pgvector:** Single database for all structured data, semantic search, and JSON-shaped outputs. pgvector extension handles embedding storage for thesis search. JSONB columns cover the role originally scoped for a separate object store:
+  - `workflow_runs.structured_output` / `.citations` / `.agent_inferences` — typed per-workflow output
+  - `theses.brief` (JSONB) + `theses.brief_generated_at` — the assembled Tier 1 trade brief (Section 4.4), referenced directly by `thesis_id` and regenerated each time the research pipeline completes
+- **Object storage (S3 or local filesystem)** was scoped for v1 but was not implemented — Postgres JSONB proved sufficient at this data volume. Revisit only if brief documents or workflow outputs grow large enough to justify offloading from the primary database.
 
 ---
 
@@ -748,6 +750,8 @@ These are **hard requirements**, not suggestions.
 | Further Reading | 3-5 sources per brief; cited sources ranked first, then additional relevant sources; one-sentence annotation per entry; all source types included. |
 | Model selection | Per-workflow. Opus for FalsificationGeneration, Recommendation, and Intake. Sonnet for all other workflows. |
 | Cost tracking | Token usage and estimated cost logged to llm_usage_log on every Anthropic API call. Append-only. No UI in v1. |
+| Trade brief storage | JSONB columns (`brief`, `brief_generated_at`) directly on `theses`, not a separate object storage layer. Assembled from `workflow_runs` + `falsification_conditions`, referenced by `thesis_id`. |
+| Human decision: "Hold for Review" | Defers the decision — thesis status remains `researched` (no dedicated status value). Recorded to `audit_log` only; Go/No-Go remain available afterward. Go → `approved`, No-Go → `rejected`. |
 
 ---
 

@@ -9,7 +9,9 @@
 - Source index rendered at bottom with properly formatted citations
 - Human decision field (Go / No-Go / Hold for review) rendered as buttons
 - On decision: thesis status updated, decision logged to audit_log with
-  timestamp
+  timestamp. Go -> approved, No-Go -> rejected. Hold defers the decision —
+  no dedicated status value; thesis remains 'researched' and the decision
+  buttons stay available (see PRD Section 16)
 - thesis_confirmed=False banner displayed prominently; dismissal button
   logs acknowledgment to audit_log
 - Tests confirm all fields render and decision buttons update status correctly

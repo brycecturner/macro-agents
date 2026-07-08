@@ -49,6 +49,8 @@ erDiagram
         enum kill_authority "alert_only | auto_close"
         boolean thesis_confirmed
         vector embedding
+        jsonb brief "nullable — assembled Tier 1 trade brief"
+        timestamp brief_generated_at "nullable"
         timestamp closed_at
         timestamp created_at
     }
@@ -175,6 +177,7 @@ erDiagram
 - `falsification_conditions.chain_operator` and `chain_group` are nullable — reserved for v2 condition chain logic
 - `trades.close_reason` is nullable — only populated on closing trades, not opening trades
 - `theses.embedding` is a pgvector column for semantic thesis search
+- `theses.brief` is a JSONB snapshot of the assembled Tier 1 trade brief, regenerated whenever the research pipeline completes; referenced directly by `thesis_id` rather than a separate object store (see PRD Section 8.2)
 - `workflow_runs` stores full agent output as JSONB — raw_output is kept for debugging but not passed between workflow steps; only structured_output is consumed downstream
 - `positions.trading_mode` records which account the position lives in at time of opening — this is a snapshot, not a live reference to pod_configs
 - `audit_log` is append-only — no UPDATE or DELETE permitted at the database level; every step in a multi-step operation gets its own row written immediately
