@@ -11,12 +11,14 @@ banner until the user explicitly acknowledges it.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
 from app.integrations.anthropic_client import AnthropicClient
 from app.models.enums import ThesisStatus
+from app.models.log import AuditLog
 from app.models.thesis import Thesis
 from app.services.research_pipeline_service import run_research_pipeline_for_thesis
 
@@ -118,8 +120,24 @@ class IntakeService:
 
     @staticmethod
     def acknowledge_intake(thesis: Thesis, db: Session) -> None:
-        """Restore thesis_confirmed=True after the user explicitly acknowledges it."""
+        """Restore thesis_confirmed=True after the user explicitly acknowledges it.
+
+        Logs the acknowledgment to audit_log — this banner persists until
+        explicitly dismissed, so the dismissal itself is a tracked action.
+        """
         thesis.thesis_confirmed = True
+        db.add(
+            AuditLog(
+                id=uuid.uuid4(),
+                pod_id=thesis.pod_id,
+                entity_id=thesis.id,
+                entity_type="thesis",
+                action="intake_acknowledged",
+                previous_value={"thesis_confirmed": False},
+                new_value={"thesis_confirmed": True},
+                changed_by="user",
+            )
+        )
         db.commit()
 
     @staticmethod

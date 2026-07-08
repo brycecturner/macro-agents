@@ -69,6 +69,77 @@
         color: var(--text-muted);
         font-size: 0.9rem;
     }
+
+    .brief-section {
+        margin-top: 2rem;
+        border-top: 1px solid var(--border);
+        padding-top: 1.75rem;
+    }
+    .brief-summary {
+        font-size: 0.95rem;
+        line-height: 1.7;
+        color: var(--text);
+    }
+    .stat-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.75rem;
+        margin: 1rem 0;
+    }
+    .stat-box { min-width: 110px; }
+    .stat-label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+    }
+    .stat-value { font-size: 1.1rem; font-weight: 700; margin-top: 0.2rem; }
+    .limitation-note {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        font-style: italic;
+        margin-top: 0.5rem;
+    }
+    .condition-list, .source-list { list-style: none; padding: 0; margin: 0; }
+    .condition-item, .source-item {
+        padding: 0.75rem 0;
+        border-bottom: 1px solid var(--border);
+    }
+    .condition-item:last-child, .source-item:last-child { border-bottom: none; }
+    .condition-type-badge {
+        display: inline-block;
+        padding: 0.15rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        margin-left: 0.5rem;
+        background: #1e1e22;
+        color: var(--text-muted);
+    }
+    .source-item a { color: var(--accent); text-decoration: none; }
+    .source-item a:hover { text-decoration: underline; }
+    .decision-buttons {
+        display: flex;
+        gap: 0.75rem;
+        margin-top: 1rem;
+    }
+    .decision-buttons button {
+        padding: 0.6rem 1.5rem;
+        border-radius: 5px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        font-family: inherit;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+    }
+    .decision-buttons button:hover { opacity: 0.85; }
+    .decision-btn-go { border-color: #1a3824; color: #4fc87a; }
+    .decision-btn-no_go { border-color: #5a1a20; color: var(--error); }
+    .decision-btn-hold { border-color: #5a3a00; color: #e8a020; }
 </style>
 {% endblock %}
 
@@ -146,6 +217,157 @@
 <div class="intake-loading">
     <p>Generating intake review…</p>
 </div>
+{% endif %}
+
+{# ── Tier 1 Trade Brief ──────────────────────────────────────────────────── #}
+{% if thesis.brief %}
+{% set brief = thesis.brief %}
+
+{% if brief.summary %}
+<div class="brief-section">
+    <div class="section-label">Summary</div>
+    <p class="brief-summary">{{ brief.summary }}</p>
+</div>
+{% endif %}
+
+{% if brief.instrument %}
+<div class="field-row">
+    <div class="field-label">Primary Instrument</div>
+    <div class="field-value">{{ brief.instrument }}</div>
+</div>
+{% endif %}
+
+<div class="brief-section">
+    <div class="section-label">Historical Analog Analysis</div>
+    <div class="stat-grid">
+        <div class="stat-box">
+            <div class="stat-label">Analog Periods</div>
+            <div class="stat-value">{{ brief.backtest_stats.n_periods }}</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Avg Return</div>
+            <div class="stat-value">{{ "%.1f%%" | format(brief.backtest_stats.avg_return * 100) if brief.backtest_stats.avg_return is not none else "—" }}</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Worst Case</div>
+            <div class="stat-value">{{ "%.1f%%" | format(brief.backtest_stats.worst_return * 100) if brief.backtest_stats.worst_return is not none else "—" }}</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Best Case</div>
+            <div class="stat-value">{{ "%.1f%%" | format(brief.backtest_stats.best_return * 100) if brief.backtest_stats.best_return is not none else "—" }}</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Win Rate</div>
+            <div class="stat-value">{{ "%.0f%%" | format(brief.backtest_stats.win_rate * 100) if brief.backtest_stats.win_rate is not none else "—" }}</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Avg Max Drawdown</div>
+            <div class="stat-value">{{ "%.1f%%" | format(brief.backtest_stats.avg_max_drawdown * 100) if brief.backtest_stats.avg_max_drawdown is not none else "—" }}</div>
+        </div>
+    </div>
+    {% if brief.backtest_stats.benchmark_comparison %}
+    <div class="stat-grid">
+        {% if brief.backtest_stats.benchmark_comparison.spy %}
+        <div class="stat-box">
+            <div class="stat-label">SPY Avg Return</div>
+            <div class="stat-value">{{ "%.1f%%" | format(brief.backtest_stats.benchmark_comparison.spy.avg_return * 100) }}</div>
+        </div>
+        {% endif %}
+        {% if brief.backtest_stats.benchmark_comparison['60_40'] %}
+        <div class="stat-box">
+            <div class="stat-label">60/40 Avg Return</div>
+            <div class="stat-value">{{ "%.1f%%" | format(brief.backtest_stats.benchmark_comparison['60_40'].avg_return * 100) }}</div>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% if brief.backtest_stats.statistical_limitation_note %}
+    <p class="limitation-note">{{ brief.backtest_stats.statistical_limitation_note }}</p>
+    {% endif %}
+    {% if brief.backtest_stats.analysis %}
+    <p class="brief-summary">{{ brief.backtest_stats.analysis }}</p>
+    {% endif %}
+</div>
+
+{% if brief.assumptions %}
+<div class="brief-section">
+    <div class="section-label">Key Assumptions</div>
+    <ul>
+        {% for assumption in brief.assumptions %}
+        <li>{{ assumption }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<div class="brief-section">
+    <div class="section-label">Falsification Conditions</div>
+    {% if brief.falsification_conditions %}
+    <ul class="condition-list">
+        {% for condition in brief.falsification_conditions %}
+        <li class="condition-item">
+            {{ condition.description }}
+            <span class="condition-type-badge">{{ condition.condition_type }}</span>
+            <div class="field-hint">
+                {{ condition.measurable_proxy }} {{ condition.evaluation_logic }}
+                {% if condition.trigger_type %} — triggers on {{ condition.trigger_type }}{% endif %}
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="field-hint">No falsification conditions have been generated.</p>
+    {% endif %}
+</div>
+
+<div class="brief-section">
+    <div class="section-label">Agent Recommendation</div>
+    <div class="field-value">
+        <span class="badge badge-{{ 'approved' if brief.recommendation.recommendation == 'go' else 'rejected' if brief.recommendation.recommendation == 'no_go' else 'draft' }}">
+            {{ (brief.recommendation.recommendation or 'none') | replace('_', ' ') }}
+        </span>
+        {% if brief.recommendation.confidence_level %}
+        <span class="field-hint">Confidence: {{ brief.recommendation.confidence_level }}</span>
+        {% endif %}
+    </div>
+    {% if brief.recommendation.rationale %}
+    <p class="brief-summary">{{ brief.recommendation.rationale }}</p>
+    {% endif %}
+</div>
+
+{# ── Human decision ──────────────────────────────────────────────────────── #}
+{% if thesis.status.value == 'researched' %}
+<div class="brief-section">
+    <div class="section-label">Your Decision</div>
+    <form method="post" action="/theses/{{ thesis.id }}/decision" class="decision-buttons">
+        <button type="submit" name="decision" value="go" class="decision-btn-go">Go</button>
+        <button type="submit" name="decision" value="no_go" class="decision-btn-no_go">No-Go</button>
+        <button type="submit" name="decision" value="hold" class="decision-btn-hold">Hold for Review</button>
+    </form>
+</div>
+{% endif %}
+
+{% if brief.source_index %}
+<div class="brief-section">
+    <div class="section-label">Source Index</div>
+    <ul class="source-list">
+        {% for citation in brief.source_index %}
+        <li class="source-item">
+            {% if citation.url %}
+            <a href="{{ citation.url }}" target="_blank" rel="noopener">{{ citation.label }}</a>
+            {% else %}
+            {{ citation.label }}
+            {% endif %}
+            <span class="condition-type-badge">{{ citation.source_type }}</span>
+            {% if citation.source_type == 'web' %}
+            <div class="field-hint">Retrieved {{ citation.retrieval_date }}</div>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
 {% endif %}
 
 {% endblock %}

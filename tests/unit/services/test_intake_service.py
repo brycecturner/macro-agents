@@ -10,6 +10,7 @@ import pytest
 
 from app.integrations.anthropic_client import AnthropicResponse
 from app.models.enums import ThesisStatus
+from app.models.log import AuditLog
 from app.services.intake_service import IntakeService
 
 
@@ -198,6 +199,23 @@ class TestAcknowledgeIntake:
         db = MagicMock()
         IntakeService.acknowledge_intake(thesis, db)
         db.commit.assert_called_once()
+
+    def test_writes_audit_log_entry(self) -> None:
+        thesis = _make_thesis(thesis_confirmed=False)
+        db = MagicMock()
+        added = []
+        db.add.side_effect = added.append
+        IntakeService.acknowledge_intake(thesis, db)
+
+        audit_rows = [a for a in added if isinstance(a, AuditLog)]
+        assert len(audit_rows) == 1
+        assert audit_rows[0].entity_type == "thesis"
+        assert audit_rows[0].entity_id == thesis.id
+        assert audit_rows[0].pod_id == thesis.pod_id
+        assert audit_rows[0].action == "intake_acknowledged"
+        assert audit_rows[0].previous_value == {"thesis_confirmed": False}
+        assert audit_rows[0].new_value == {"thesis_confirmed": True}
+        assert audit_rows[0].changed_by == "user"
 
 
 # ---------------------------------------------------------------------------

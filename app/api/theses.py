@@ -19,6 +19,7 @@ from app.models.pod import Pod, PodConfig
 from app.models.thesis import Thesis
 from app.services.intake_service import IntakeService
 from app.services.research_pipeline_service import run_research_pipeline_for_thesis
+from app.services.thesis_decision_service import InvalidDecisionError, record_decision
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +224,33 @@ def get_thesis_brief(
     if thesis.brief is None:
         raise HTTPException(status_code=404, detail="Brief has not been generated yet")
     return thesis.brief
+
+
+# ---------------------------------------------------------------------------
+# POST /theses/{thesis_id}/decision — human Go / No-Go / Hold decision
+# ---------------------------------------------------------------------------
+
+
+@router.post("/theses/{thesis_id}/decision", response_class=HTMLResponse)
+def submit_thesis_decision(
+    request: Request,
+    thesis_id: uuid.UUID,
+    db: Annotated[Session, Depends(get_db)],
+    decision: Annotated[str, Form()] = "",
+) -> HTMLResponse:
+    thesis = db.query(Thesis).filter(Thesis.id == thesis_id).first()
+    if thesis is None:
+        raise HTTPException(status_code=404, detail="Thesis not found")
+    if thesis.status != ThesisStatus.researched:
+        raise HTTPException(
+            status_code=409, detail="Thesis is not awaiting a decision."
+        )
+    try:
+        record_decision(thesis, decision, db)
+    except InvalidDecisionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    db.commit()
+    return RedirectResponse(url=f"/theses/{thesis_id}", status_code=303)
 
 
 # ---------------------------------------------------------------------------
