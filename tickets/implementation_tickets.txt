@@ -298,6 +298,81 @@ TICKET 018 [DONE] — Intake Agent
   acknowledges it via the UI
 - Tests confirm intake generation, UI response handling, and timeout behavior
 
+TICKET 018b [DONE] — Instrument Extraction from Intake Notes → thesis_instruments
+- Gap: TICKET-018's intake agent restates the instrument in prose (as part
+  of "## Thesis as I Understood It") but never persists it as structured
+  data. No ticket in this list ever writes a ThesisInstrument row —
+  `ThesisInstrument` is only ever defined (migration + model), never
+  instantiated anywhere in app/. As a result every thesis currently has
+  zero rows in thesis_instruments, which cascades into
+  InstrumentAnalysisWorkflow and BacktestWorkflow both degrading to a
+  PARTIAL result ("no instruments on thesis ...") — not because those
+  workflows are broken, but because they correctly have nothing to
+  analyze. This defeats a meaningful chunk of the research pipeline on
+  every thesis run today.
+- Fix:
+    1. Extend the existing one-volley intake LLM call (IntakeService) to
+       also extract a LIST of one or more instruments from thesis_title +
+       notes, in addition to the existing prose restatement — no new LLM
+       call needed, just a structured field alongside the existing
+       response. Do not hardcode an assumption of exactly one instrument:
+       the thesis_instruments schema already supports multiple rows per
+       thesis via the role field (primary/hedge/secondary), specifically
+       so multi-leg theses (spreads, pairs, hedges) don't require a schema
+       change later (PRD Section 6.6) — this extraction step should honor
+       that from day one even though v1 execution only acts on the
+       primary leg.
+    2. For each extracted instrument, the agent infers: ticker symbol,
+       role (primary/hedge/secondary), and direction (long/short). Do NOT
+       blindly copy the thesis-level `direction` field onto every
+       instrument — a hedge leg may intentionally run the opposite
+       direction from the primary (e.g. "long TLT, hedged with short
+       IEF"). Exactly one instrument must be marked role=primary, and its
+       direction should match the thesis-level `direction` captured at
+       submission (TICKET-017); if the agent's extraction disagrees on
+       the primary's direction, treat that as ambiguity (see point 4)
+       rather than silently overriding either value.
+    3. Write one ThesisInstrument row per extracted instrument, at the
+       same point the intake_message is persisted
+       (IntakeService.generate_intake_message) — before the user responds
+       or the timeout fires, so they're available to the research
+       pipeline either way.
+    4. If any extracted instrument (ticker, role, or direction) is
+       ambiguous or uncertain — including a primary-direction mismatch
+       against the thesis-level field — the agent should raise it as one
+       of intake's existing "clarifying questions" (per TICKET-018)
+       rather than silently guessing. This already fits the intake
+       message's existing structure; no new UI surface needed.
+    5. v1 execution/position-sizing still only acts on the primary
+       instrument (hedge/secondary legs are v2 execution scope per PRD
+       Section 6.6) — this ticket is about research-side extraction and
+       persistence being multi-instrument-ready, not about executing
+       multi-leg trades.
+    6. Known v1 limitation to flag, not solve here: if the user's intake
+       response corrects an instrument in free text (e.g. "actually the
+       hedge should be GLD, not IEF"), there is no mechanism to re-parse
+       that correction into a structured update — intake is one-volley
+       per PRD Section 4.2, and reconciling free-text corrections against
+       thesis_instruments is out of scope for this ticket. Document this
+       limitation in the intake response UI copy or leave a comment; do
+       not silently attempt partial parsing.
+- Acceptance criteria:
+    1. Submitting a single-instrument thesis results in exactly one
+       ThesisInstrument row (role=primary, direction matching the
+       thesis-level field) once the intake message is generated
+    2. Submitting a thesis whose notes describe multiple legs (e.g. a
+       primary position plus an explicit hedge) results in multiple
+       ThesisInstrument rows, each with its own role and direction —
+       extraction is not hardcoded to a count of one
+    3. InstrumentAnalysisWorkflow and BacktestWorkflow no longer degrade to
+       PARTIAL for "no instruments" on a normally-submitted thesis
+    4. A mismatch between the extracted primary instrument's direction and
+       the thesis-level direction field surfaces as an intake clarifying
+       question rather than a silent override
+    5. Tests confirm single-instrument extraction, multi-instrument
+       extraction, persistence of all rows, and the ambiguous-instrument
+       question path
+
 TICKET 019 [DONE] — Research Workflow Orchestration
 - WorkflowRunner triggered automatically after intake confirmation or timeout
 - Runs all 7 core workflows sequentially in order defined in PRD Section 4.3
@@ -310,6 +385,47 @@ TICKET 019 [DONE] — Research Workflow Orchestration
   brief; no reply handling
 - Tests confirm end-to-end orchestration from intake to brief completion
   and email notification sent on completion
+
+TICKET 019b [NEXT] — UI: Status Indicators for Intake Generation & Research Pipeline Run
+- Gap: after submitting a new idea (POST /theses), the detail page redirects
+  immediately while intake message generation runs as a background task
+  (Opus call, several seconds). detail.html shows no loading state while
+  thesis.status is still 'draft' — the existing "Generating intake review…"
+  message only renders once status is already 'intake_sent', by which point
+  the message has already been written, so in practice nothing appears on
+  screen until the user manually refreshes. Similarly, once the user submits
+  their intake response (or the 24h timeout proceeds), the full 7-workflow
+  research pipeline runs in the background via research_pipeline_service.py
+  — this can take several minutes (WebResearchWorkflow alone has a
+  hardcoded 65s rate-limit sleep between search execution and annotation,
+  on top of 6 further LLM calls across the chain, 2 of them Opus for
+  FalsificationGenerationWorkflow and RecommendationWorkflow) — and the user
+  gets no on-page confirmation that anything is happening or when to expect
+  a result.
+- Fix:
+    1. Detail page shows an "Intaking thesis…" banner whenever
+       thesis.status == 'draft' (i.e. before the intake message has been
+       generated) — same slot/style as the existing intake-loading banner.
+    2. Submitting the intake response form (POST /theses/{id}/intake-response)
+       redirects to a detail page showing a banner along the lines of:
+       "Sent — research is now running in the background and will appear
+       here and in your email in about [X] minutes." Validate the real
+       figure against actual pipeline run times before shipping the copy —
+       do not hardcode the user's placeholder guess without checking; the
+       known 65s sleep plus 6 LLM calls (2 Opus) suggests a multi-minute
+       range, but confirm with real runs.
+    3. Both banners are purely informational for this ticket — no
+       polling/auto-refresh required; the user still refreshes manually to
+       see the finished result. Auto-refresh/HTMX polling is a natural
+       follow-up but out of scope here.
+- Acceptance criteria:
+    1. GET /theses/{id} shows "Intaking thesis…" when status == 'draft'
+    2. POST /theses/{id}/intake-response redirects to a detail page showing
+       the "running in background, check back in ~X minutes" banner
+       immediately after submission (i.e. before research completes)
+    3. Existing banners/behavior for thesis_confirmed=False and completed
+       briefs are unaffected
+    4. Tests confirm both banners render at the correct status/timing
 
 
 ═══════════════════════════════════════════════

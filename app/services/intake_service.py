@@ -1,15 +1,30 @@
 """IntakeService — one-volley intake agent for new thesis submissions.
 
-On thesis creation the agent restates the thesis as it understood it and
-asks any clarifying questions needed before the full research pipeline runs.
-The user has one chance to respond with corrections or answers. After the
+On thesis creation the agent restates the thesis as it understood it, asks
+any clarifying questions needed before the full research pipeline runs, and
+extracts the instrument(s) the thesis trades into thesis_instruments. The
+user has one chance to respond with corrections or answers. After the
 configurable timeout the pipeline proceeds with the original interpretation
 and thesis_confirmed is set to False, showing a non-dismissible warning
 banner until the user explicitly acknowledges it.
+
+Instrument extraction (TICKET-018b) piggybacks on the existing one-volley
+LLM call rather than a separate call or a dedicated pipeline workflow: the
+thesis-level `direction` field is already captured at submission
+(TICKET-017), so only the ticker symbol(s), role, and (for non-primary
+legs) direction need inference. A thesis may describe more than one
+instrument (e.g. a primary position plus an explicit hedge) — extraction is
+not hardcoded to a single instrument, matching the thesis_instruments
+schema's existing support for multi-leg theses (PRD Section 6.6). Any
+ambiguity in the extracted instrument(s) — including a primary instrument
+whose inferred direction disagrees with the thesis-level field — is raised
+as one of intake's existing clarifying questions rather than silently
+resolved.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -17,9 +32,9 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.integrations.anthropic_client import AnthropicClient
-from app.models.enums import ThesisStatus
+from app.models.enums import Direction, InstrumentRole, ThesisStatus
 from app.models.log import AuditLog
-from app.models.thesis import Thesis
+from app.models.thesis import Thesis, ThesisInstrument
 from app.services.research_pipeline_service import run_research_pipeline_for_thesis
 
 logger = logging.getLogger(__name__)
@@ -30,9 +45,10 @@ _MAX_TOKENS = 1024
 
 _SYSTEM = (
     "You are doing a pre-flight check on a new macro trade thesis submission. "
-    "Your job is lightweight: restate the thesis as you understood it and ask "
+    "Your job is lightweight: restate the thesis as you understood it, ask "
     "only the questions you genuinely need answered before a full research "
-    "pipeline runs. Be brief and direct."
+    "pipeline runs, and extract the instrument(s) the thesis trades. Be brief "
+    "and direct."
 )
 
 _PROMPT = """\
@@ -43,19 +59,83 @@ Thesis submitted:
 - Notes:
 {notes}
 
-Write a short intake message with these two parts:
+Respond with a JSON object with exactly two keys:
 
-## Thesis as I Understood It
-In 2–3 sentences, restate: the primary instrument (or your best inference if \
-not specified), the direction, the time horizon, and the core macro mechanism. \
-Be specific enough that the PM can immediately catch any misinterpretation.
+- "intake_message": a short markdown message with these two parts:
 
-## Questions (if any)
-Ask only questions you genuinely need answered before research can run \
-effectively — for example, if the instrument is ambiguous between plausible \
-alternatives, the time horizon conflicts with the stated mechanism, or a key \
-assumption is missing. If the thesis is unambiguous, omit this section entirely.\
+  ## Thesis as I Understood It
+  In 2–3 sentences, restate: the primary instrument (or your best inference \
+if not specified), the direction, the time horizon, and the core macro \
+mechanism. Be specific enough that the PM can immediately catch any \
+misinterpretation.
+
+  ## Questions (if any)
+  Ask only questions you genuinely need answered before research can run \
+effectively — for example, if an instrument is ambiguous between plausible \
+alternatives, the time horizon conflicts with the stated mechanism, a key \
+assumption is missing, or an instrument's role or direction (see below) is \
+uncertain. If the thesis is unambiguous, omit this section entirely.
+
+- "instruments": a list of one or more objects describing every ETF \
+instrument this thesis trades. Most theses describe exactly one, but some \
+describe an explicit hedge or secondary leg (e.g. "long TLT, hedged with \
+short IEF") — do not assume a hedge or secondary leg shares the primary \
+instrument's direction; infer each instrument's direction independently \
+from the notes. Each object has:
+  - "instrument": the ETF ticker symbol
+  - "role": one of "primary", "hedge", "secondary" — exactly one instrument \
+must be "primary"
+  - "direction": "long" or "short"
+
+  The primary instrument's direction should match the thesis-level \
+Direction given above ({direction}). If your inference disagrees, note \
+that disagreement as a clarifying question in "intake_message" rather than \
+silently picking one.
+
+Respond only with the JSON object. No markdown fences, no preamble.\
 """
+
+
+def _parse_intake_response(
+    content: str, default_direction: Direction
+) -> tuple[str, list[dict]]:
+    """Parse the JSON intake response into (intake_message, instruments).
+
+    Falls back to treating the raw content as the intake message with no
+    extracted instruments if the response isn't valid JSON — a malformed
+    response still shows the user *something* rather than nothing, matching
+    the graceful-degradation pattern used by the research workflows.
+
+    Each returned instrument dict has "instrument" (str), "role"
+    (InstrumentRole), and "direction" (Direction) — invalid/missing role
+    defaults to primary; invalid/missing direction defaults to
+    default_direction (the thesis-level direction).
+    """
+    try:
+        parsed = json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("IntakeService: LLM response was not valid JSON")
+        return content, []
+
+    intake_message = parsed.get("intake_message") or content
+    raw_instruments = parsed.get("instruments") or []
+
+    instruments: list[dict] = []
+    for entry in raw_instruments:
+        symbol = entry.get("instrument")
+        if not symbol:
+            continue
+        try:
+            role = InstrumentRole(entry.get("role", "primary"))
+        except ValueError:
+            role = InstrumentRole.primary
+        try:
+            direction = Direction(entry.get("direction"))
+        except ValueError:
+            direction = default_direction
+        instruments.append({"instrument": symbol, "role": role, "direction": direction})
+
+    return intake_message, instruments
 
 
 class IntakeService:
@@ -64,7 +144,8 @@ class IntakeService:
     def generate_intake_message(
         self, thesis: Thesis, db: Session, api_key: str
     ) -> None:
-        """Call the LLM, persist the intake message, and set status to intake_sent."""
+        """Call the LLM, persist the intake message and extracted instruments,
+        and set status to intake_sent."""
         client = AnthropicClient(api_key=api_key, db=db)
         prompt = _PROMPT.format(
             title=thesis.title,
@@ -81,11 +162,32 @@ class IntakeService:
             system=_SYSTEM,
             max_tokens=_MAX_TOKENS,
         )
-        thesis.intake_message = response.content
+
+        intake_message, instruments = _parse_intake_response(
+            response.content, thesis.direction
+        )
+
+        thesis.intake_message = intake_message
         thesis.intake_sent_at = datetime.now(UTC)
         thesis.status = ThesisStatus.intake_sent
+
+        for entry in instruments:
+            db.add(
+                ThesisInstrument(
+                    id=uuid.uuid4(),
+                    thesis_id=thesis.id,
+                    instrument=entry["instrument"],
+                    direction=entry["direction"],
+                    role=entry["role"],
+                )
+            )
+
         db.commit()
-        logger.info("Intake message generated for thesis %s", thesis.id)
+        logger.info(
+            "Intake message generated for thesis %s (%d instrument(s) extracted)",
+            thesis.id,
+            len(instruments),
+        )
 
     def handle_intake_response(
         self, thesis: Thesis, user_response: str, db: Session
