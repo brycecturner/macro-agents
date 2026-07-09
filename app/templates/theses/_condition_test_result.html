@@ -1,0 +1,13 @@
+<div class="test-now-outcome test-now-{{ result.status }}">
+    {% if result.status == 'not_implemented' %}
+    <p class="field-hint">{{ result.message }}</p>
+    {% else %}
+    <p><strong>{{ result.status | capitalize }}</strong></p>
+    <p class="field-hint">
+        Data value: {{ result.data_value }} — Threshold: {{ result.threshold }}
+    </p>
+    {% if result.citation %}
+    <p class="field-hint">{{ result.citation }}</p>
+    {% endif %}
+    {% endif %}
+</div>

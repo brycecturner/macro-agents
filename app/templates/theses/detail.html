@@ -140,6 +140,28 @@
     .decision-btn-go { border-color: #1a3824; color: #4fc87a; }
     .decision-btn-no_go { border-color: #5a1a20; color: var(--error); }
     .decision-btn-hold { border-color: #5a3a00; color: #e8a020; }
+
+    .condition-actions {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+    }
+    .test-now-result:empty { display: none; }
+    .test-now-result { margin-top: 0.5rem; }
+    .condition-edit { margin-top: 0.75rem; }
+    .condition-edit summary {
+        cursor: pointer;
+        font-size: 0.85rem;
+        color: var(--text-muted);
+    }
+    .condition-edit form, .condition-add-form form {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        margin-top: 0.75rem;
+        max-width: 480px;
+    }
+    .condition-add-form { margin-top: 1.5rem; }
 </style>
 {% endblock %}
 
@@ -300,23 +322,86 @@
 </div>
 {% endif %}
 
+{% set conditions_editable = thesis.status.value == 'approved' %}
 <div class="brief-section">
     <div class="section-label">Falsification Conditions</div>
-    {% if brief.falsification_conditions %}
+    {% if conditions %}
     <ul class="condition-list">
-        {% for condition in brief.falsification_conditions %}
+        {% for condition in conditions %}
         <li class="condition-item">
             {{ condition.description }}
-            <span class="condition-type-badge">{{ condition.condition_type }}</span>
+            <span class="condition-type-badge">{{ condition.condition_type.value }}</span>
             <div class="field-hint">
                 {{ condition.measurable_proxy }} {{ condition.evaluation_logic }}
                 {% if condition.trigger_type %} — triggers on {{ condition.trigger_type }}{% endif %}
             </div>
+
+            <div class="condition-actions">
+                <button
+                    type="button"
+                    class="btn-ghost"
+                    hx-post="/theses/{{ thesis.id }}/conditions/{{ condition.id }}/test-now"
+                    hx-target="#test-now-result-{{ condition.id }}"
+                    hx-swap="innerHTML"
+                >Test Now</button>
+
+                {% if conditions_editable %}
+                <form method="post" action="/theses/{{ thesis.id }}/conditions/{{ condition.id }}/delete" style="display:inline">
+                    <button type="submit" class="btn-ghost">Delete</button>
+                </form>
+                {% endif %}
+            </div>
+
+            <div id="test-now-result-{{ condition.id }}" class="test-now-result"></div>
+
+            {% if conditions_editable %}
+            <details class="condition-edit">
+                <summary>Edit</summary>
+                <form method="post" action="/theses/{{ thesis.id }}/conditions/{{ condition.id }}/update">
+                    <label>Description</label>
+                    <textarea name="description" rows="2">{{ condition.description }}</textarea>
+                    <label>Condition Type</label>
+                    <select name="condition_type">
+                        <option value="state" {% if condition.condition_type.value == 'state' %}selected{% endif %}>state</option>
+                        <option value="event" {% if condition.condition_type.value == 'event' %}selected{% endif %}>event</option>
+                    </select>
+                    <label>Trigger Type (event conditions only)</label>
+                    <input type="text" name="trigger_type" value="{{ condition.trigger_type or '' }}">
+                    <label>Measurable Proxy</label>
+                    <input type="text" name="measurable_proxy" value="{{ condition.measurable_proxy }}">
+                    <label>Evaluation Logic</label>
+                    <input type="text" name="evaluation_logic" value="{{ condition.evaluation_logic }}">
+                    <button type="submit">Save</button>
+                </form>
+            </details>
+            {% endif %}
         </li>
         {% endfor %}
     </ul>
     {% else %}
     <p class="field-hint">No falsification conditions have been generated.</p>
+    {% endif %}
+
+    {% if conditions_editable %}
+    <div class="condition-add-form">
+        <div class="section-label">Add Condition</div>
+        <form method="post" action="/theses/{{ thesis.id }}/conditions">
+            <label>Description</label>
+            <textarea name="description" rows="2" placeholder="e.g. 10Y yield falls below 4.0%"></textarea>
+            <label>Condition Type</label>
+            <select name="condition_type">
+                <option value="state">state</option>
+                <option value="event">event</option>
+            </select>
+            <label>Trigger Type (event conditions only)</label>
+            <input type="text" name="trigger_type" placeholder="e.g. CPI_RELEASE">
+            <label>Measurable Proxy</label>
+            <input type="text" name="measurable_proxy" placeholder="e.g. FRED:DGS10">
+            <label>Evaluation Logic</label>
+            <input type="text" name="evaluation_logic" placeholder="e.g. < 4.0">
+            <button type="submit">Add Condition</button>
+        </form>
+    </div>
     {% endif %}
 </div>
 

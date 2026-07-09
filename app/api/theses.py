@@ -16,7 +16,7 @@ from app.core.database import get_db, get_session_factory
 from app.core.settings import get_settings
 from app.models.enums import Direction, KillAuthority, ThesisStatus
 from app.models.pod import Pod, PodConfig
-from app.models.thesis import Thesis
+from app.models.thesis import FalsificationCondition, Thesis
 from app.models.workflow import FurtherReading
 from app.services.intake_service import IntakeService
 from app.services.research_pipeline_service import run_research_pipeline_for_thesis
@@ -185,12 +185,19 @@ def thesis_detail(
         .order_by(FurtherReading.rank)
         .all()
     )
+    conditions = (
+        db.query(FalsificationCondition)
+        .filter(FalsificationCondition.thesis_id == thesis_id)
+        .order_by(FalsificationCondition.created_at)
+        .all()
+    )
     return templates.TemplateResponse(
         request,
         "theses/detail.html",
         {
             "thesis": thesis,
             "further_reading": further_reading,
+            "conditions": conditions,
             **_get_pod_context(db),
         },
     )

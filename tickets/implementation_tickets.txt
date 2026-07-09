@@ -348,7 +348,7 @@ TICKET 022 — Further Reading UI (Tier 3) [DONE]
 - Sources ordered: cited sources first, then additional relevant sources
 - Tests confirm correct ordering and all fields present
 
-TICKET 023 — Falsification Condition Editing & Lock Enforcement
+TICKET 023 — Falsification Condition Editing & Lock Enforcement [DONE]
 - Falsification conditions are editable (add, remove, modify) only when
   thesis status is 'approved' — never when 'active' or any other status
 - Edit controls (add, edit, delete buttons) rendered on brief page only
@@ -393,8 +393,16 @@ TICKET 026 — State Condition Evaluator
 - Fetches required data from FRED or IBKR based on condition definition
 - Returns: result (passing / falsified), data_value, threshold, citation
 - Result logged to condition_evaluations with full citation
+- Wire into app/services/condition_service.py::test_now() — TICKET-023 left
+  this as a stub (status: "not_implemented") for state-type conditions since
+  this evaluator didn't exist yet. Replace the stub body for
+  condition_type == 'state' with a real call to ConditionEvaluator, returning
+  passing/failing plus the real data_value, threshold, and citation. No route
+  or template changes needed — app/templates/theses/_condition_test_result.html
+  already branches on result.status and renders the non-stub fields.
 - Tests confirm correct evaluation logic and citation format for state
-  conditions
+  conditions, and that Test Now on a state condition no longer returns
+  "not_implemented"
 
 TICKET 027 — Event Condition Evaluator
 - EventConditionEvaluator checks whether the condition's trigger_type has
@@ -405,8 +413,12 @@ TICKET 027 — Event Condition Evaluator
   last_evaluated_at matching trigger_type
 - If trigger found: evaluates condition and logs result
 - If no trigger: logs result as 'no_trigger' with timestamp
-- Tests confirm both scheduled and unscheduled trigger detection, and
-  correct no_trigger logging
+- Wire into app/services/condition_service.py::test_now() — complete the
+  TICKET-023/026 stub by handling condition_type == 'event' the same way:
+  real result/data_value/threshold/citation instead of "not_implemented"
+- Tests confirm both scheduled and unscheduled trigger detection, correct
+  no_trigger logging, and that Test Now on an event condition no longer
+  returns "not_implemented"
 
 TICKET 028 — News Poller & LLM Event Classifier
 - Scheduled job runs targeted web searches via WebSearchClient for each

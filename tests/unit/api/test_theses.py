@@ -9,10 +9,16 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from app.models.enums import Direction, KillAuthority, ThesisStatus, TradingMode
+from app.models.enums import (
+    ConditionType,
+    Direction,
+    KillAuthority,
+    ThesisStatus,
+    TradingMode,
+)
 from app.models.log import AuditLog
 from app.models.pod import Pod, PodConfig
-from app.models.thesis import Thesis
+from app.models.thesis import FalsificationCondition, Thesis
 from app.models.workflow import FurtherReading
 
 # ---------------------------------------------------------------------------
@@ -26,6 +32,7 @@ def _configure_db(
     thesis: MagicMock | None = None,
     no_pod: bool = False,
     further_reading: list | None = None,
+    conditions: list | None = None,
 ) -> MagicMock:
     """Wire mock_db.query() to return sensible objects per model class."""
     mock_pod = MagicMock()
@@ -47,10 +54,33 @@ def _configure_db(
             q.filter.return_value.order_by.return_value.all.return_value = (
                 further_reading or []
             )
+        elif model is FalsificationCondition:
+            q.filter.return_value.order_by.return_value.all.return_value = (
+                conditions or []
+            )
         return q
 
     mock_db.query.side_effect = _query
     return mock_pod
+
+
+def _make_condition(
+    *,
+    condition_id: uuid.UUID | None = None,
+    description: str = "10Y yield falls below 4.0%",
+    condition_type: ConditionType = ConditionType.state,
+    trigger_type: str | None = None,
+    measurable_proxy: str = "FRED:DGS10",
+    evaluation_logic: str = "< 4.0",
+) -> MagicMock:
+    c = MagicMock()
+    c.id = condition_id or uuid.uuid4()
+    c.description = description
+    c.condition_type = condition_type
+    c.trigger_type = trigger_type
+    c.measurable_proxy = measurable_proxy
+    c.evaluation_logic = evaluation_logic
+    return c
 
 
 def _make_further_reading(
@@ -604,7 +634,18 @@ class TestThesisDetail:
         self, client: TestClient, mock_db: MagicMock
     ) -> None:
         thesis = _make_thesis(status=ThesisStatus.researched, brief=_make_brief())
-        _configure_db(mock_db, thesis=thesis)
+        state_condition = _make_condition(
+            description="10Y yield falls below 4.0%",
+            condition_type=ConditionType.state,
+        )
+        event_condition = _make_condition(
+            description="CPI surprises to the upside",
+            condition_type=ConditionType.event,
+            trigger_type="CPI_RELEASE",
+        )
+        _configure_db(
+            mock_db, thesis=thesis, conditions=[state_condition, event_condition]
+        )
         response = client.get(f"/theses/{thesis.id}")
         assert "10Y yield falls below 4.0%" in response.text
         assert "state" in response.text
@@ -648,6 +689,75 @@ class TestThesisDetail:
         _configure_db(mock_db, thesis=thesis)
         response = client.get(f"/theses/{thesis.id}")
         assert f"/theses/{thesis.id}/decision" not in response.text
+
+
+# ---------------------------------------------------------------------------
+# GET /theses/{thesis_id} — Falsification Condition Editing & Lock Enforcement
+# ---------------------------------------------------------------------------
+
+
+class TestConditionEditingUI:
+    def test_edit_controls_shown_when_approved(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.approved, brief=_make_brief())
+        condition = _make_condition()
+        _configure_db(mock_db, thesis=thesis, conditions=[condition])
+        response = client.get(f"/theses/{thesis.id}")
+        assert f"/theses/{thesis.id}/conditions/{condition.id}/delete" in (
+            response.text
+        )
+        assert f"/theses/{thesis.id}/conditions/{condition.id}/update" in (
+            response.text
+        )
+        assert f"/theses/{thesis.id}/conditions" in response.text  # add form
+
+    def test_edit_controls_hidden_when_active(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.active, brief=_make_brief())
+        condition = _make_condition()
+        _configure_db(mock_db, thesis=thesis, conditions=[condition])
+        response = client.get(f"/theses/{thesis.id}")
+        assert f"/theses/{thesis.id}/conditions/{condition.id}/delete" not in (
+            response.text
+        )
+        assert f"/theses/{thesis.id}/conditions/{condition.id}/update" not in (
+            response.text
+        )
+
+    def test_edit_controls_hidden_when_researched(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.researched, brief=_make_brief())
+        condition = _make_condition()
+        _configure_db(mock_db, thesis=thesis, conditions=[condition])
+        response = client.get(f"/theses/{thesis.id}")
+        assert f"/theses/{thesis.id}/conditions/{condition.id}/update" not in (
+            response.text
+        )
+
+    def test_test_now_button_shown_when_approved(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.approved, brief=_make_brief())
+        condition = _make_condition()
+        _configure_db(mock_db, thesis=thesis, conditions=[condition])
+        response = client.get(f"/theses/{thesis.id}")
+        assert f"/theses/{thesis.id}/conditions/{condition.id}/test-now" in (
+            response.text
+        )
+
+    def test_test_now_button_shown_when_active(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.active, brief=_make_brief())
+        condition = _make_condition()
+        _configure_db(mock_db, thesis=thesis, conditions=[condition])
+        response = client.get(f"/theses/{thesis.id}")
+        assert f"/theses/{thesis.id}/conditions/{condition.id}/test-now" in (
+            response.text
+        )
 
 
 # ---------------------------------------------------------------------------
