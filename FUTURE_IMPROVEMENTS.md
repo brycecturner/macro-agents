@@ -4,6 +4,24 @@ Decisions that were consciously deferred during implementation. Captured here so
 
 ---
 
+## Thesis Search & List View — pgvector Semantic Search (moved from TICKET-025)
+
+TICKET-025 originally scoped a thesis list/filter page plus keyword search via pgvector semantic search, with embeddings "generated for each thesis on creation using Anthropic embeddings."
+
+**Why this doesn't work as written:** Anthropic does not offer an embeddings API. The Messages API (wrapped by `AnthropicClient`) only does chat completions. Anthropic's own docs point to Voyage AI as their recommended embeddings partner — a separate paid third-party API requiring its own key and per-call cost. The alternative, running an open-source model locally via `sentence-transformers`, pulls in `torch` and a multi-GB dependency footprint for a single-user v1 tool.
+
+**Why deferred:** Picking an embeddings provider is a real cost/dependency tradeoff (ongoing per-embedding spend for Voyage AI vs. a heavy local model), not something to default into mid-ticket. It needs a deliberate decision, not an assumption baked into the original ticket text.
+
+**What the ticket still needs when revisited:**
+- Thesis list page: title, status, instrument, direction, created date, condition status (if active)
+- Filterable by status, instrument, and date range
+- Keyword search over thesis content — semantic (pgvector) if an embeddings provider is chosen, or a simpler SQL `ILIKE` search over title/notes as a fallback that needs no new dependency at all
+- `theses.embedding` (pgvector, 1536-dim) column already exists from the initial migration — nullable, unpopulated
+
+**Revisit when:** There's an appetite to add a paid embeddings dependency (Voyage AI is the natural first choice, matching Anthropic's own recommendation), or when keyword search alone proves insufficient for the volume of theses in the system.
+
+---
+
 ## Pydantic Validation on Workflow Structured Output
 
 Currently, `WorkflowResult.structured_output` is an untyped `dict`. Each workflow parses the LLM response with `json.loads()` and extracts fields via `.get()` with silent defaults. A malformed LLM response (wrong field names, wrong types, missing required fields) passes through as empty or partial data rather than failing loudly.

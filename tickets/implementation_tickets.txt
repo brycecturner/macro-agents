@@ -374,13 +374,13 @@ TICKET 024 — Deep Dive Workflows & UI (Tier 2) [DONE]
 - Deep dive results include their own citation section
 - Tests confirm each workflow executes and results append correctly
 
-TICKET 025 — Thesis Search & List View
-- Thesis list page shows all theses with: title, status, instrument,
-  direction, created date, condition status (if active)
-- Filterable by status, instrument, and date range
-- Keyword search uses pgvector semantic search on thesis content
-- Embeddings generated for each thesis on creation using Anthropic embeddings
-- Tests confirm filtering, search results, and embedding generation
+TICKET 025 — Thesis Search & List View [MOVED TO FUTURE_IMPROVEMENTS.md]
+- Was: thesis list/filter view + pgvector semantic search over thesis
+  content, with embeddings generated via "Anthropic embeddings" on creation.
+- Moved out because Anthropic has no embeddings API (their recommended
+  partner, Voyage AI, is a paid per-call third-party dependency) — the
+  cost/dependency tradeoff needs a real decision, not a default pick made
+  mid-ticket. See FUTURE_IMPROVEMENTS.md for full context.
 
 
 ═══════════════════════════════════════════════
