@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.conditions import router as conditions_router
 from app.api.debug import router as debug_router
+from app.api.deep_dives import router as deep_dives_router
 from app.api.theses import router as theses_router
 from app.core.database import get_db, get_session_factory
 from app.jobs.intake_timeout import check_intake_timeouts
@@ -41,6 +42,7 @@ app = FastAPI(title="Macro Agents", version="0.1.0", lifespan=lifespan)
 app.include_router(debug_router)
 app.include_router(theses_router)
 app.include_router(conditions_router)
+app.include_router(deep_dives_router)
 
 
 @app.get("/health")

@@ -761,6 +761,54 @@ class TestConditionEditingUI:
 
 
 # ---------------------------------------------------------------------------
+# GET /theses/{thesis_id} — Deep Dive triggers (Tier 2)
+# ---------------------------------------------------------------------------
+
+
+class TestDeepDiveTriggers:
+    def test_trigger_button_present_for_each_deep_dive(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.researched, brief=_make_brief())
+        _configure_db(mock_db, thesis=thesis)
+        response = client.get(f"/theses/{thesis.id}")
+        for workflow_name in (
+            "SensitivityAnalysisWorkflow",
+            "RegimeStressTestWorkflow",
+            "PortfolioCorrelationWorkflow",
+            "HistoricalAnalogDetailWorkflow",
+        ):
+            assert f"/theses/{thesis.id}/deep-dives/{workflow_name}/run" in (
+                response.text
+            )
+
+    def test_trigger_button_labels_rendered(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.researched, brief=_make_brief())
+        _configure_db(mock_db, thesis=thesis)
+        response = client.get(f"/theses/{thesis.id}")
+        assert "Sensitivity Analysis" in response.text
+        assert "Regime Stress Test" in response.text
+        assert "Portfolio Correlation Check" in response.text
+        assert "Historical Analog Detail" in response.text
+
+    def test_results_container_present(
+        self, client: TestClient, mock_db: MagicMock
+    ) -> None:
+        thesis = _make_thesis(status=ThesisStatus.researched, brief=_make_brief())
+        _configure_db(mock_db, thesis=thesis)
+        response = client.get(f"/theses/{thesis.id}")
+        assert 'id="deep-dive-results"' in response.text
+
+    def test_absent_when_no_brief(self, client: TestClient, mock_db: MagicMock) -> None:
+        thesis = _make_thesis(status=ThesisStatus.intake_sent, brief=None)
+        _configure_db(mock_db, thesis=thesis)
+        response = client.get(f"/theses/{thesis.id}")
+        assert "deep-dives" not in response.text
+
+
+# ---------------------------------------------------------------------------
 # GET /theses/{thesis_id} — Further Reading (Tier 3)
 # ---------------------------------------------------------------------------
 

@@ -18,6 +18,7 @@ from app.models.enums import Direction, KillAuthority, ThesisStatus
 from app.models.pod import Pod, PodConfig
 from app.models.thesis import FalsificationCondition, Thesis
 from app.models.workflow import FurtherReading
+from app.services.deep_dive_service import DEEP_DIVE_DISPLAY_LABELS
 from app.services.intake_service import IntakeService
 from app.services.research_pipeline_service import run_research_pipeline_for_thesis
 from app.services.thesis_decision_service import InvalidDecisionError, record_decision
@@ -198,6 +199,7 @@ def thesis_detail(
             "thesis": thesis,
             "further_reading": further_reading,
             "conditions": conditions,
+            "deep_dive_options": DEEP_DIVE_DISPLAY_LABELS,
             **_get_pod_context(db),
         },
     )

@@ -363,7 +363,7 @@ TICKET 023 — Falsification Condition Editing & Lock Enforcement [DONE]
 - Tests confirm: edit endpoints reject active thesis conditions, Test Now works
   on both approved and active theses, edit controls absent from active thesis brief UI
 
-TICKET 024 — Deep Dive Workflows & UI (Tier 2)
+TICKET 024 — Deep Dive Workflows & UI (Tier 2) [DONE]
 - SensitivityAnalysisWorkflow, RegimeStressTestWorkflow,
   PortfolioCorrelationWorkflow, HistoricalAnalogDetailWorkflow implemented
   as BaseWorkflow subclasses

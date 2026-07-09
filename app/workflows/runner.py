@@ -119,11 +119,11 @@ def register_workflows(db) -> None:
 
 
 class WorkflowRunner:
-    """Executes a list of workflow classes sequentially for a given thesis.
+    """Executes workflow classes for a given thesis, persisting each run.
 
     Each execution is persisted to workflow_runs. On failure the runner logs
     the error, marks the run as failed, sets context.has_partial_results, and
-    continues with the remaining steps.
+    (for run()) continues with the remaining steps.
     """
 
     def __init__(self, db) -> None:
@@ -143,49 +143,86 @@ class WorkflowRunner:
         context = WorkflowContext(thesis=thesis, pod_settings=pod_settings, db=self._db)
 
         for workflow_cls in workflow_classes:
-            workflow = workflow_cls()
-            run_id = uuid.uuid4()
-            started_at = datetime.now(UTC)
-
-            # Create the run record before execute() so AnthropicClient can
-            # log the correct workflow_run_id FK in llm_usage_log.
-            run_record = WorkflowRun(
-                id=run_id,
-                thesis_id=thesis.id,
-                workflow_name=workflow.name,
-                status=DBWorkflowStatus.failed,  # safe default; updated on success
-                started_at=started_at,
-            )
-            self._db.add(run_record)
-            self._db.flush()
-            context.current_workflow_run_id = run_id
-
-            try:
-                result = workflow.execute(thesis, context)
-                run_record.status = DBWorkflowStatus.completed
-                run_record.structured_output = result.structured_output
-                run_record.citations = _serialize_citations(result.citations)
-                run_record.agent_inferences = result.agent_inferences
-                run_record.raw_output = result.raw_output
-                run_record.completed_at = datetime.now(UTC)
-            except Exception as exc:
-                logger.exception(
-                    "Workflow %s failed for thesis %s", workflow.name, thesis.id
-                )
-                result = WorkflowResult(
-                    workflow_name=workflow.name,
-                    status=WorkflowStatus.FAILED,
-                    structured_output={},
-                    citations=[],
-                    agent_inferences=[],
-                    raw_output=str(exc),
-                )
-                run_record.raw_output = str(exc)
-                run_record.completed_at = datetime.now(UTC)
-                context.has_partial_results = True
-
-            self._db.commit()
-            context.current_workflow_run_id = None
+            result = self._execute_step(thesis, workflow_cls, context)
             context.prior_results.append(result)
 
         return context.prior_results
+
+    def run_single(
+        self,
+        thesis,
+        workflow_cls: type[BaseWorkflow],
+        prior_results: list[WorkflowResult],
+        pod_settings=None,
+    ) -> WorkflowResult:
+        """Execute a single workflow with caller-supplied prior_results.
+
+        Used for user-triggered deep dives (PRD Section 4.4 Tier 2): they run
+        independently of the sequential core pipeline, on demand, but still
+        need to consume prior core-workflow outputs (e.g.
+        HistoricalAnalogWorkflow's analog periods). Callers are responsible
+        for reconstructing prior_results from persisted workflow_runs rows.
+        """
+        context = WorkflowContext(
+            thesis=thesis,
+            prior_results=list(prior_results),
+            pod_settings=pod_settings,
+            db=self._db,
+        )
+        return self._execute_step(thesis, workflow_cls, context)
+
+    def _execute_step(
+        self,
+        thesis,
+        workflow_cls: type[BaseWorkflow],
+        context: WorkflowContext,
+    ) -> WorkflowResult:
+        """Run one workflow, persisting a workflow_runs row for it.
+
+        Shared by run() (sequential core pipeline) and run_single() (on-demand
+        deep dives) so both paths log identically and never diverge.
+        """
+        workflow = workflow_cls()
+        run_id = uuid.uuid4()
+        started_at = datetime.now(UTC)
+
+        # Create the run record before execute() so AnthropicClient can
+        # log the correct workflow_run_id FK in llm_usage_log.
+        run_record = WorkflowRun(
+            id=run_id,
+            thesis_id=thesis.id,
+            workflow_name=workflow.name,
+            status=DBWorkflowStatus.failed,  # safe default; updated on success
+            started_at=started_at,
+        )
+        self._db.add(run_record)
+        self._db.flush()
+        context.current_workflow_run_id = run_id
+
+        try:
+            result = workflow.execute(thesis, context)
+            run_record.status = DBWorkflowStatus.completed
+            run_record.structured_output = result.structured_output
+            run_record.citations = _serialize_citations(result.citations)
+            run_record.agent_inferences = result.agent_inferences
+            run_record.raw_output = result.raw_output
+            run_record.completed_at = datetime.now(UTC)
+        except Exception as exc:
+            logger.exception(
+                "Workflow %s failed for thesis %s", workflow.name, thesis.id
+            )
+            result = WorkflowResult(
+                workflow_name=workflow.name,
+                status=WorkflowStatus.FAILED,
+                structured_output={},
+                citations=[],
+                agent_inferences=[],
+                raw_output=str(exc),
+            )
+            run_record.raw_output = str(exc)
+            run_record.completed_at = datetime.now(UTC)
+            context.has_partial_results = True
+
+        self._db.commit()
+        context.current_workflow_run_id = None
+        return result

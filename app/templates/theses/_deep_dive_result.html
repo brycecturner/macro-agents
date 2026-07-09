@@ -1,0 +1,125 @@
+<div class="deep-dive-result">
+    <div class="deep-dive-header">
+        <span class="section-label">{{ result.workflow_name | replace('Workflow', '') }}</span>
+        <span class="badge badge-{{ 'approved' if result.status.value == 'completed' else 'rejected' if result.status.value == 'failed' else 'draft' }}">
+            {{ result.status.value }}
+        </span>
+    </div>
+
+    {% set output = result.structured_output %}
+
+    {% if result.status.value == 'failed' %}
+    <p class="field-hint">This deep dive failed to run. See the workflow log for details.</p>
+    {% endif %}
+
+    {% if result.agent_inferences %}
+    <ul class="field-hint">
+        {% for inf in result.agent_inferences %}
+        <li>{{ inf }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if result.workflow_name == 'SensitivityAnalysisWorkflow' and output.offsets %}
+    <table class="deep-dive-table">
+        <thead>
+            <tr><th>Entry Offset</th><th>Avg Return</th><th>Win Rate</th><th>N Periods</th></tr>
+        </thead>
+        <tbody>
+        {% for entry in output.offsets %}
+            <tr>
+                <td>{{ 'original' if entry.offset_months == 0 else ('%+d mo' | format(entry.offset_months)) }}</td>
+                <td>{{ '%.1f%%' | format(entry.aggregate.avg_return * 100) if entry.aggregate.avg_return is defined else '—' }}</td>
+                <td>{{ '%.0f%%' | format(entry.aggregate.win_rate * 100) if entry.aggregate.win_rate is defined else '—' }}</td>
+                <td>{{ entry.aggregate.n_periods if entry.aggregate.n_periods is defined else 0 }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if result.workflow_name == 'RegimeStressTestWorkflow' and output.regimes %}
+    <table class="deep-dive-table">
+        <thead>
+            <tr><th>Regime</th><th>Runs</th><th>Avg Return</th><th>Win Rate</th></tr>
+        </thead>
+        <tbody>
+        {% for regime_name, entry in output.regimes.items() %}
+            <tr>
+                <td>{{ regime_name | replace('_', ' ') }}</td>
+                <td>{{ entry.n_runs }}</td>
+                <td>{{ '%.1f%%' | format(entry.aggregate.avg_return * 100) if entry.aggregate.avg_return is defined else '—' }}</td>
+                <td>{{ '%.0f%%' | format(entry.aggregate.win_rate * 100) if entry.aggregate.win_rate is defined else '—' }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if result.workflow_name == 'PortfolioCorrelationWorkflow' %}
+        {% if output.correlations %}
+        <table class="deep-dive-table">
+            <thead>
+                <tr><th>Instrument</th><th>Correlation</th><th>Overlapping Days</th></tr>
+            </thead>
+            <tbody>
+            {% for symbol, entry in output.correlations.items() %}
+                <tr>
+                    <td>{{ symbol }}</td>
+                    <td>{{ '%.2f' | format(entry.correlation) }}</td>
+                    <td>{{ entry.n_overlapping_days }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="field-hint">No other positions found in this pod to compare against.</p>
+        {% endif %}
+    {% endif %}
+
+    {% if result.workflow_name == 'HistoricalAnalogDetailWorkflow' and output.periods %}
+    <ul class="condition-list">
+        {% for period in output.periods %}
+        <li class="condition-item">
+            <strong>{{ period.label }}</strong>
+            {% if period.duration_months %} ({{ period.duration_months }} months){% endif %}
+            <div class="field-hint">
+                {% if period.total_return is not none %}
+                Return: {{ '%.1f%%' | format(period.total_return * 100) }} —
+                Max Drawdown: {{ '%.1f%%' | format(period.max_drawdown * 100) }}
+                {% else %}
+                Performance data unavailable for this period.
+                {% endif %}
+            </div>
+            {% if period.likely_catalysts %}
+            <ul>
+                {% for c in period.likely_catalysts %}
+                <li class="field-hint">{{ c }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if output.analysis %}
+    <p class="brief-summary">{{ output.analysis }}</p>
+    {% endif %}
+
+    {% if result.citations %}
+    <div class="section-label deep-dive-sources-label">Sources</div>
+    <ul class="source-list">
+        {% for citation in result.citations %}
+        <li class="source-item">
+            {% if citation.url %}
+            <a href="{{ citation.url }}" target="_blank" rel="noopener">{{ citation.label }}</a>
+            {% else %}
+            {{ citation.label }}
+            {% endif %}
+            <span class="condition-type-badge">{{ citation.source_type.value }}</span>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
